@@ -1,6 +1,6 @@
 {
   "name": "dsh-milestone",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Git-style milestone timeline for DeepSeek Harness: a fixed-pitch dot rail beside the conversation — hover for rich metadata, click to jump to any message.",
   "type": "module",
   "main": "lib/index.js",
