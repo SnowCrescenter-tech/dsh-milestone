@@ -61,6 +61,14 @@ export const zh = {
   'reason.interrupted': '已中断',
   /** TurnEndReason `blocked`. */
   'reason.blocked': '已阻塞',
+  /** Copy-message tooltip action. */
+  'copy.message': '复制消息',
+  /** Fork-from-here tooltip action. */
+  'fork.here': '从此处 fork',
+  /** Collapse-turn tooltip action. */
+  'collapse.turn': '折叠此轮',
+  /** Expand-turn tooltip action. */
+  'expand.turn': '展开此轮',
 } as const
 
 export type MilestoneKey = keyof typeof zh
@@ -91,4 +99,8 @@ export const en: Record<MilestoneKey, string> = {
   'reason.maxTokens': 'Max tokens reached',
   'reason.interrupted': 'Interrupted',
   'reason.blocked': 'Blocked',
+  'copy.message': 'Copy message',
+  'fork.here': 'Fork from here',
+  'collapse.turn': 'Collapse turn',
+  'expand.turn': 'Expand turn',
 }

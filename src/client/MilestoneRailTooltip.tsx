@@ -2,8 +2,9 @@
  * MilestoneRailTooltip: the hover tooltip chrome of the milestone rail.
  *
  * Owns no state: MilestoneRail feeds the hovered mark's metadata, the
- * bookmark flag, the star-toggle callback, and the mouse handlers that keep
- * the tooltip alive while the cursor crosses the rail→tooltip gap.
+ * bookmark flag, the star-toggle callback, the copy/fork action callbacks
+ * (with their transient acknowledgement flags), and the mouse handlers that
+ * keep the tooltip alive while the cursor crosses the rail→tooltip gap.
  *
  * Hover stability (T10): the wrapper is pointer-event-bearing
  * (`pointerEvents: 'auto'`), so its star toggle is clickable AND so
@@ -19,6 +20,7 @@
  */
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { relativeTimeParts } from './label-logic'
+import type { MilestoneKey } from './locales.ts'
 import type { HoverInfo } from './MilestoneRail.tsx'
 
 export interface MilestoneRailTooltipProps {
@@ -28,6 +30,14 @@ export interface MilestoneRailTooltipProps {
   readonly bookmarked: boolean
   /** Star toggle: flips the hovered mark's bookmark in the persisted store. */
   readonly onToggleBookmark: () => void
+  /** Copy action: copies the hovered mark's FULL text (async; resolves false on failure). */
+  readonly onCopy: (mark: HoverInfo['mark']) => Promise<void>
+  /** Fork action: forks the session at the hovered mark's seq (resolves a child session id). */
+  readonly onFork: (mark: HoverInfo['mark']) => void
+  /** Whether the copy acknowledgement is showing for the hovered mark. */
+  readonly copied: boolean
+  /** Whether the fork acknowledgement is showing for the hovered mark. */
+  readonly forked: boolean
   /** Keep hover set while the cursor is over the tooltip. */
   readonly onMouseEnter: () => void
   /** Dismiss the tooltip once the cursor leaves it. */
@@ -45,6 +55,10 @@ export function MilestoneRailTooltip({
   hover,
   bookmarked,
   onToggleBookmark,
+  onCopy,
+  onFork,
+  copied,
+  forked,
   onMouseEnter,
   onMouseLeave,
   panelRight,
@@ -75,7 +89,7 @@ export function MilestoneRailTooltip({
         pointerEvents: 'auto',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9aa4b8', fontSize: 11, marginBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, color: '#9aa4b8', fontSize: 11, marginBottom: 4 }}>
         <span>{t('pos.of', { n: hover.index + 1, m: hover.total })}</span>
         {hover.turnLabel !== null && <span>{hover.turnLabel}</span>}
         <button
@@ -115,6 +129,52 @@ export function MilestoneRailTooltip({
           >
             <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
           </svg>
+        </button>
+        <button
+          type="button"
+          data-copy-message
+          data-copied={copied ? 'true' : undefined}
+          onClick={(e) => {
+            e.stopPropagation()
+            void onCopy(hover.mark)
+          }}
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'transparent',
+            border: 'none',
+            padding: '2px 6px',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            color: copied ? '#7ee2a8' : '#8b96ab',
+          }}
+        >
+          {t('copy.message')}
+        </button>
+        <button
+          type="button"
+          data-fork-here
+          data-forked={forked ? 'true' : undefined}
+          onClick={(e) => {
+            e.stopPropagation()
+            onFork(hover.mark)
+          }}
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'transparent',
+            border: 'none',
+            padding: '2px 6px',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+            color: forked ? '#7ee2a8' : '#8b96ab',
+          }}
+        >
+          {t('fork.here')}
         </button>
       </div>
       <div style={{ color: '#c7cede' }}>{hover.mark.preview !== '' ? hover.mark.preview : t('no.text')}</div>

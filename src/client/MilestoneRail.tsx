@@ -37,6 +37,7 @@ import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepsee
 import { badgeRingStyle, deriveBadge } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
+import { copyText } from './clipboard-logic'
 import { reasonKeyOf } from './label-logic'
 import { deriveTurnMeta } from './tooltip-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
@@ -194,6 +195,7 @@ function turnTailOf(turn: unknown): { ttftMs?: number; tokensPerSecond?: number 
 export function MilestoneRail({
   useSession,
   loadOlder,
+  forkAt,
   useStore,
   actions,
   t = (key) => key,
@@ -274,6 +276,11 @@ export function MilestoneRail({
   const [search, setSearch] = useState<SearchState>({ query: '', activePos: 0, panelOpen: false })
   // T10: bookmarks-only filter — when on, only bookmarked dots render.
   const [bookmarksOnly, setBookmarksOnly] = useState(false)
+  // C3: transient copy/fork acknowledgements — the mark key whose tooltip
+  // action last succeeded. Cleared when hover moves to a DIFFERENT mark
+  // (buildHover is the reset — no timers).
+  const [copiedKey, setCopiedKey] = useState<string | null>(null)
+  const [forkedKey, setForkedKey] = useState<string | null>(null)
   // Roving tabindex (T9): the dot index that owns the single tab stop.
   const [focusIndex, setFocusIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -401,6 +408,10 @@ export function MilestoneRail({
   }
 
   const buildHover = (mark: MilestoneMark, index: number): Omit<HoverInfo, 'top'> => {
+    // C3: hovering a DIFFERENT mark clears the transient copy/fork
+    // acknowledgements — the hover change itself is the reset (no timers).
+    if (copiedKey !== null && mark.key !== copiedKey) setCopiedKey(null)
+    if (forkedKey !== null && mark.key !== forkedKey) setForkedKey(null)
     const turn = mark.turn !== undefined ? timeline.turns.get(mark.turn) : undefined
     let durationLabel: string | null = null
     let reasonLabel: string | null = null
@@ -456,6 +467,23 @@ export function MilestoneRail({
     // Optional actions: legacy render paths without the store seat no-op.
     actions?.toggle(key)
     setHover((h) => (h === null ? h : { ...h }))
+  }
+
+  /**
+   * C3: copy the hovered mark's FULL message text to the system clipboard.
+   * The acknowledgement only shows when the write actually succeeded.
+   */
+  const onCopy = async (mark: MilestoneMark): Promise<void> => {
+    const ok = await copyText(mark.text)
+    if (ok) setCopiedKey(mark.key)
+  }
+
+  /**
+   * C3: fork the session at the hovered mark, anchoring the cut at its event
+   * seq. The acknowledgement only shows once the fork resolved.
+   */
+  const onFork = (mark: MilestoneMark): void => {
+    void forkAt(mark.seq).then(() => setForkedKey(mark.key))
   }
 
   const dotPitch = DOT_HIT + DOT_GAP
@@ -688,6 +716,10 @@ export function MilestoneRail({
           hover={hover}
           bookmarked={isBookmarked(bookmarkedKeys, hover.mark.key)}
           onToggleBookmark={() => onToggleBookmark(hover.mark.key)}
+          onCopy={onCopy}
+          onFork={onFork}
+          copied={copiedKey === hover.mark.key}
+          forked={forkedKey === hover.mark.key}
           // Hover stability (T10): entering the tooltip keeps hover set
           // (the dot no longer clears it on mouse-leave — the cursor must
           // cross the rail→tooltip gap); leaving the tooltip dismisses it.
