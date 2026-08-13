@@ -34,6 +34,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { InjectFace, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import { badgeRingStyle, deriveBadge } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
@@ -61,6 +62,19 @@ const MIN_MARKS = 2
 const PREVIEW_LENGTH = 80
 /** Stable no-bookmarks fallback for render paths without the store seat. */
 const NO_BOOKMARKS: readonly string[] = []
+/** Stable no-kinds fallback for marks whose turn carries no badge nodes. */
+const NO_KINDS: readonly string[] = []
+/**
+ * Self-contained pulse keyframes for the transient badges (running/awaiting):
+ * an expanding currentColor ring on box-shadow plus an opacity beat, driven by
+ * `animation` on the badge ring span (kept in an inline <style> so the plugin
+ * stays zero-asset).
+ */
+const BADGE_PULSE_CSS = `@keyframes milestone-badge-pulse {
+  0% { box-shadow: 0 0 0 0 currentColor; opacity: 0.85 }
+  70% { box-shadow: 0 0 0 5px transparent; opacity: 0.35 }
+  100% { box-shadow: 0 0 0 0 transparent; opacity: 0.85 }
+}`
 /** Visual dot diameter (px). */
 const DOT_SIZE = 12
 /** Hit area per dot (px) — larger than the dot for comfortable clicking. */
@@ -197,6 +211,32 @@ export function MilestoneRail({ useSession, loadOlder, useStore, actions }: Mile
     }
     return result
   }, [order, nodes])
+
+  // F4: turn-scoped durable badge kinds ('turn-error' / 'turn-max-tokens' /
+  // 'model-retry') indexed by the turn their node sits on. A cancelled
+  // model-retry is dead (its turn aborted before the retry started) and
+  // carries no badge.
+  const kindsByTurn = useMemo<ReadonlyMap<number, readonly string[]>>(() => {
+    const result = new Map<number, string[]>()
+    for (const node of nodes.values()) {
+      if (node.kind !== 'turn-error' && node.kind !== 'turn-max-tokens' && node.kind !== 'model-retry') continue
+      if (node.kind === 'model-retry') {
+        const retryState = (node.data as { retryState?: string } | undefined)?.retryState
+        if (retryState === 'cancelled') continue
+      }
+      if (node.location.kind !== 'turn' && node.location.kind !== 'step') continue
+      const kinds = result.get(node.location.turn.turn) ?? []
+      kinds.push(node.kind)
+      result.set(node.location.turn.turn, kinds)
+    }
+    return result
+  }, [order, nodes])
+
+  // F4: transient badges target only the newest mark — the session is
+  // producing tokens (running) or waiting on a pending interaction
+  // (awaitingInput: a non-empty `pending` snapshot).
+  const running = useSession(s => s.running)
+  const awaitingInput = (useSession(s => s.pending) as unknown[]).length > 0
 
   const [railBox, setRailBox] = useState<RailBox | null>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
@@ -396,6 +436,7 @@ export function MilestoneRail({ useSession, loadOlder, useStore, actions }: Mile
       }}
       aria-label="会话里程碑"
     >
+      <style>{BADGE_PULSE_CSS}</style>
       {showLoadOlder && (
         <button
           type="button"
@@ -517,6 +558,21 @@ export function MilestoneRail({ useSession, loadOlder, useStore, actions }: Mile
               : dotState === 'current'
                 ? '0 0 0 3px rgba(255, 255, 255, 0.75)'
                 : 'none'
+          // F4: the mark's status badge. Durable kinds (error/max-tokens/
+          // retry) come from the nodes stamped on this mark's turn; the
+          // transient kinds (running/awaiting) only wear on the newest mark
+          // (displayMarks, so the bookmarks filter re-anchors the target).
+          // Precedence lives in badge-logic (error > max-tokens > retry >
+          // running > awaiting); the badge ring COMPOSES with markState's
+          // ring/shadow/opacity — it is a child of the dot span, so the
+          // dimmed-dot opacity scales it down with the dot.
+          const badge = deriveBadge({
+            nodeKinds: mark.turn === undefined ? NO_KINDS : kindsByTurn.get(mark.turn) ?? NO_KINDS,
+            lastMark: i === displayMarks.length - 1,
+            running,
+            awaitingInput,
+          })
+          const ringStyle = badge === null ? null : badgeRingStyle(badge)
           return (
             <button
               key={mark.key}
@@ -548,6 +604,7 @@ export function MilestoneRail({ useSession, loadOlder, useStore, actions }: Mile
             >
               <span
                 style={{
+                  position: 'relative',
                   width: DOT_SIZE,
                   height: DOT_SIZE,
                   borderRadius: '50%',
@@ -558,7 +615,24 @@ export function MilestoneRail({ useSession, loadOlder, useStore, actions }: Mile
                   opacity: isHovered || dotState !== 'dimmed' ? 1 : 0.22,
                 }}
                 data-bookmarked={bookmarked ? 'true' : undefined}
-              />
+              >
+                {ringStyle !== null && (
+                  <span
+                    data-badge={badge}
+                    style={{
+                      position: 'absolute',
+                      inset: -3,
+                      borderRadius: '50%',
+                      border: `2px solid ${ringStyle.color}`,
+                      color: ringStyle.color,
+                      pointerEvents: 'none',
+                      animation: ringStyle.pulse
+                        ? 'milestone-badge-pulse 1.4s ease-out infinite'
+                        : undefined,
+                    }}
+                  />
+                )}
+              </span>
             </button>
           )
         })}
