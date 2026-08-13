@@ -1,14 +1,16 @@
 # dsh-milestone
 
-会话里程碑导航条（DeepSeek Harness 插件）。在会话视图右侧渲染一条垂直 scrubber，每个 **user 发言** 对应一个进度点：鼠标悬停预览该条消息的前 80 字，点击平滑跳转到对应位置。
+会话里程碑导航条（DeepSeek Harness 插件）。在会话视图右侧渲染一条 **固定间距的圆点时间线**（类似 git 提交图），每个 **user 发言** 对应一个蓝色渐变圆点：悬停显示时间/轮次/耗时/原因/首字延迟等元信息，点击平滑跳转，长会话可滚轮滑动选点。
 
 > **dsh-plugin** · 适配 DeepSeek Harness (`deepseek-ai/deepseek-harness`) Web UI。
 
 ## 功能
 
-- **进度点（tick）**：每条真实 user 消息 = 一个 tick，按**真实渲染偏移**定位（非等距），跟随滚动与内容变化实时更新。
-- **悬停预览**：hover 显示该条 user 消息的前 80 字。
-- **点击跳转**：点击 tick 平滑滚动到对应消息（`scrollIntoView`）。
+- **固定间距圆点**：每条真实 user 消息 = 一个圆点，**等距排列**（不随对话长度等比缩放），方便点击。
+- **蓝色渐变**：圆点按先后渐变（最新最深 → 最早最浅），一眼区分新旧，类似 git 提交图。
+- **滚轮滑动**：长会话圆点超出可视区时，鼠标在里程碑条上滚轮即可滑动选点。
+- **丰富悬停**：hover 显示消息预览 + 相对时间 + 第 N/M 条 + 第 N 轮 + 用时 + 结束原因 + 首字延迟(TTFT) + tokens/秒。
+- **点击跳转**：点击圆点平滑滚动到对应消息（`scrollIntoView`）。
 - 少于 2 条 user 消息时不渲染（无导航价值）。
 
 ## 安装
@@ -58,14 +60,16 @@ src/client/MilestoneRail.tsx      milestone.rail entry（session scope）
 
 - **注入点**：`shell.overlay`（`kind: 'list'`，`scope: 'root'`）——全框架浮动层，附加式、点击穿透，是"悬浮 rail"的唯一正确位置。
 - **会话数据**：通过声明 session-scope 子槽 `milestone.rail`，框架自动注入 `SessionProvider`（`PropsRenderSlots` 从子槽 scope 推导），rail 组件因此拿到 `useSession` / `sessionId`。
-- **消息定位**：`useSession(s => s.chat.order)` + `s.chat.nodes.get(key)` 过滤 `kind === 'user'`；DOM 锚点 `data-chat-anchor-key`（节点 key = `13:input-message<messageId>`），scrollport 为 `[data-conversation-scroll]`。
-- **性能**：行元素按消息列表版本缓存（O(n) 重算）；scroll/resize 通过 `requestAnimationFrame` 节流。
+- **圆点列表**：`useSession(s => s.chat.order)` + `s.chat.nodes.get(key)` 过滤 `kind === 'user'`，取节点 `key`（DOM 锚点）与 `location.turn`。
+- **悬停元数据**：`s.chat.timeline.turns.get(turn)` 提供 turn 起止时间/状态/结束原因；`turn.data.get('turn-tail')` 提供 TTFT 与 tokens/秒（ui-conversation 发布的 location data）。
+- **跳转**：DOM 锚点 `data-chat-anchor-key`（节点 key = `13:input-message<messageId>`），scrollport 为 `[data-conversation-scroll]`。
 
 ## 已知限制
 
 - 仅覆盖当前已加载的消息窗口（harness 初始加载最近 50 条事件，向上滚动触发 `loadOlder` 分页）；rail 会随分页自动更新，但更早的消息需要先滚动加载。
-- preview 从 DOM `textContent` 提取，长消息截断为 80 字。
-- 尚未实现"当前定位"高亮（P1）。
+- preview 从消息 `content` 文本块提取，长消息截断为 80 字。
+- TTFT / tokens/秒 依赖 turn-tail 位置数据，窗口外或未完成的 turn 不会显示（自动隐藏）。
+- 尚未实现"当前定位"高亮（P1，已有蓝色渐变区分先后）。
 
 ## License
 
