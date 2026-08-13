@@ -12,6 +12,7 @@
  * `data-search-clear`).
  */
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 
 /** Dot diameter (px) — matches the rail's DOT_HIT so the toggle aligns. */
 const DOT_HIT = 22
@@ -30,6 +31,8 @@ export interface RailSearchUiProps {
   readonly onQueryChange: (query: string) => void
   readonly onSearchKeyDown: (e: ReactKeyboardEvent<HTMLInputElement>) => void
   readonly onClear: () => void
+  /** Locale interpreter: resolves `dsh-milestone` dictionary keys (from MilestoneRail). */
+  readonly t: TranslateNS<'dsh-milestone'>
 }
 
 /**
@@ -46,13 +49,14 @@ export function RailSearchUi({
   onQueryChange,
   onSearchKeyDown,
   onClear,
+  t,
 }: RailSearchUiProps) {
   return (
     <>
       <button
         type="button"
         data-search-toggle
-        aria-label="搜索消息"
+        aria-label={t('search.label')}
         aria-pressed={panelOpen}
         onClick={onToggle}
         style={{
@@ -102,8 +106,8 @@ export function RailSearchUi({
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <input
               data-rail-search
-              aria-label="搜索消息"
-              placeholder="搜索消息内容"
+              aria-label={t('search.label')}
+              placeholder={t('search.placeholder')}
               value={query}
               onChange={(e) => onQueryChange(e.target.value)}
               onKeyDown={onSearchKeyDown}
@@ -123,7 +127,7 @@ export function RailSearchUi({
             <button
               type="button"
               data-search-clear
-              aria-label="清空搜索"
+              aria-label={t('search.clear')}
               onClick={onClear}
               style={{
                 width: 22,

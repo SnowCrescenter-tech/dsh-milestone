@@ -37,8 +37,10 @@ import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepsee
 import { badgeRingStyle, deriveBadge } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
+import { reasonKeyOf } from './label-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
+import type { MilestoneKey } from './locales.ts'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
@@ -148,19 +150,6 @@ function formatDuration(ms: number): string {
   const m = Math.floor(ms / 60_000)
   const s = Math.floor((ms % 60_000) / 1000)
   return `${m}m${s}s`
-}
-
-/** Human label for a TurnEndReason kind. */
-function reasonLabelOf(kind: string): string {
-  switch (kind) {
-    case 'completed': return '已完成'
-    case 'aborted': return '已中止'
-    case 'error': return '出错'
-    case 'max-tokens': return '达到上限'
-    case 'interrupted': return '已中断'
-    case 'blocked': return '已阻塞'
-    default: return kind
-  }
 }
 
 /** Read the ui-conversation 'turn-tail' location data (ttftMs/tokensPerSecond). */
@@ -391,7 +380,9 @@ export function MilestoneRail({
       }
       if (turn.end !== undefined) {
         const reason = (turn.end.data as { reason?: { kind?: string } }).reason
-        if (reason?.kind !== undefined) reasonLabel = reasonLabelOf(reason.kind)
+        // Unknown end-reason kinds pass through `reasonKeyOf` unchanged and
+        // `t` falls back to the raw kind string (label-logic's escape hatch).
+        if (reason?.kind !== undefined) reasonLabel = t(reasonKeyOf(reason.kind) as MilestoneKey)
       }
       const tail = turnTailOf(turn)
       if (tail !== undefined) {
@@ -403,7 +394,7 @@ export function MilestoneRail({
       mark,
       index,
       total: displayMarks.length,
-      turnLabel: mark.turn !== undefined ? `第 ${mark.turn} 轮` : null,
+      turnLabel: mark.turn !== undefined ? t('turn.label', { n: mark.turn }) : null,
       durationLabel,
       reasonLabel,
       ttftLabel,
@@ -444,7 +435,7 @@ export function MilestoneRail({
         display: 'flex',
         flexDirection: 'column',
       }}
-      aria-label="会话里程碑"
+      aria-label={t('rail.label')}
     >
       <style>{BADGE_PULSE_CSS}</style>
       {showLoadOlder && (
@@ -452,8 +443,8 @@ export function MilestoneRail({
           type="button"
           data-load-older
           data-loading-older={loadingOlder ? 'true' : undefined}
-          title="加载更早消息"
-          aria-label="加载更早消息"
+          title={t('load.older')}
+          aria-label={t('load.older')}
           disabled={loadingOlder}
           onClick={() => { void loadOlder() }}
           style={{
@@ -480,7 +471,7 @@ export function MilestoneRail({
       <button
         type="button"
         data-bookmarks-toggle
-        aria-label="只看收藏"
+        aria-label={t('bookmark.filter')}
         aria-pressed={bookmarksOnly}
         data-active={bookmarksOnly ? 'true' : undefined}
         onClick={() => setBookmarksOnly((v) => !v)}
@@ -523,13 +514,14 @@ export function MilestoneRail({
         onQueryChange={updateQuery}
         onSearchKeyDown={onSearchKeyDown}
         onClear={clearSearch}
+        t={t}
       />
 
       <div
         ref={listRef}
         data-rail-list
         tabIndex={0}
-        aria-label="会话里程碑列表"
+        aria-label={t('rail.list')}
         onFocus={onListFocus}
         onKeyDown={onListKeyDown}
         style={{
@@ -607,7 +599,7 @@ export function MilestoneRail({
               data-rail-dot
               tabIndex={focusIndex === i ? 0 : -1}
               onFocus={() => setFocusIndex(i)}
-              aria-label={`跳转到第 ${i + 1} 条消息`}
+              aria-label={t('jump.to', { n: i + 1 })}
               aria-current={dotState === 'active' ? 'true' : undefined}
               data-current={dotState === 'current' ? 'true' : undefined}
               data-dimmed={dotState === 'dimmed' ? 'true' : undefined}
@@ -659,6 +651,7 @@ export function MilestoneRail({
           // cross the rail→tooltip gap); leaving the tooltip dismisses it.
           onMouseEnter={() => setHover((h) => h)}
           onMouseLeave={() => setHover(null)}
+          t={t}
         />
       )}
 
@@ -678,7 +671,7 @@ export function MilestoneRail({
             userSelect: 'none',
           }}
         >
-          已显示 {marks.length} 条 · 还有更早
+          {t('window.hint', { n: marks.length })}
         </div>
       )}
     </div>

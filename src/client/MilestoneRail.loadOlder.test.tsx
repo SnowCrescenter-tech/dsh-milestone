@@ -18,6 +18,7 @@ import { buildSnapshot } from '../test/snapshot-fixture.ts'
 import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
 import { MilestoneRail } from './MilestoneRail.tsx'
 import type { MilestoneRailProps } from './MilestoneRail.tsx'
+import { zh } from './locales.ts'
 
 const USERS: RailUser[] = [
   { key: '13:user<older-1>', seq: 1, time: 1_700_000_000_000, text: '最早的问题' },
@@ -28,6 +29,14 @@ const USERS: RailUser[] = [
 interface PagingFlags {
   readonly hasMore?: boolean
   readonly loadingOlder?: boolean
+}
+
+/** Locale interpreter over the zh dictionary (mirrors renderRail's makeT). */
+function makeT(dict: Record<string, string>) {
+  return (key: string, params?: Record<string, string | number>) => {
+    const tpl = dict[key] ?? key
+    return params ? tpl.replace(/\{(\w+)\}/g, (slot, name) => (name in params ? String(params[name]) : slot)) : tpl
+  }
 }
 
 /**
@@ -43,6 +52,7 @@ function renderRailFlagged(users: RailUser[], flags: PagingFlags) {
     sessionId: 'fixture',
     useProjection: () => undefined,
     loadOlder,
+    t: makeT(zh as Record<string, string>),
   } as unknown as MilestoneRailProps
 
   const result = render(

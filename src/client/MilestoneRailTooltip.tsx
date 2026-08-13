@@ -17,6 +17,8 @@
  * reason / TTFT / tokens-per-second) is preserved untouched; only the star
  * toggle and the pointer-events/hover semantics were added.
  */
+import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { relativeTimeParts } from './label-logic'
 import type { HoverInfo } from './MilestoneRail.tsx'
 
 export interface MilestoneRailTooltipProps {
@@ -32,6 +34,8 @@ export interface MilestoneRailTooltipProps {
   readonly onMouseLeave: () => void
   /** Horizontal anchor: viewport-right offset the tooltip hugs (px). */
   readonly panelRight: number
+  /** Locale interpreter: resolves `dsh-milestone` dictionary keys (from MilestoneRail). */
+  readonly t: TranslateNS<'dsh-milestone'>
 }
 
 /**
@@ -44,7 +48,9 @@ export function MilestoneRailTooltip({
   onMouseEnter,
   onMouseLeave,
   panelRight,
+  t,
 }: MilestoneRailTooltipProps) {
+  const relativeTime = relativeTimeParts(hover.mark.time, Date.now())
   return (
     <div
       onMouseEnter={onMouseEnter}
@@ -70,12 +76,12 @@ export function MilestoneRailTooltip({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#9aa4b8', fontSize: 11, marginBottom: 4 }}>
-        <span>第 {hover.index + 1} / {hover.total} 条</span>
+        <span>{t('pos.of', { n: hover.index + 1, m: hover.total })}</span>
         {hover.turnLabel !== null && <span>{hover.turnLabel}</span>}
         <button
           type="button"
           data-star
-          aria-label="收藏此消息"
+          aria-label={t('bookmark.star')}
           aria-pressed={bookmarked}
           data-starred={bookmarked ? 'true' : undefined}
           onClick={(e) => {
@@ -111,23 +117,14 @@ export function MilestoneRailTooltip({
           </svg>
         </button>
       </div>
-      <div style={{ color: '#c7cede' }}>{hover.mark.preview !== '' ? hover.mark.preview : '（无文本）'}</div>
+      <div style={{ color: '#c7cede' }}>{hover.mark.preview !== '' ? hover.mark.preview : t('no.text')}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 11, marginTop: 4 }}>
-        <span>{formatRelativeTime(hover.mark.time)}</span>
-        {hover.durationLabel !== null && <span>用时 {hover.durationLabel}</span>}
+        <span>{t(relativeTime.key, { n: relativeTime.n })}</span>
+        {hover.durationLabel !== null && <span>{t('duration.label', { name: hover.durationLabel })}</span>}
         {hover.reasonLabel !== null && <span>{hover.reasonLabel}</span>}
-        {hover.ttftLabel !== null && <span>首字 {hover.ttftLabel}</span>}
+        {hover.ttftLabel !== null && <span>{t('ttft.label', { name: hover.ttftLabel })}</span>}
         {hover.tpsLabel !== null && <span>{hover.tpsLabel}</span>}
       </div>
     </div>
   )
-}
-
-/** Relative wall-clock label for a Unix-epoch-ms timestamp. */
-function formatRelativeTime(time: number): string {
-  const diff = Date.now() - time
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return `${Math.floor(diff / 86_400_000)} 天前`
 }
