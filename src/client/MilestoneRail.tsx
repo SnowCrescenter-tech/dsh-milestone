@@ -33,22 +33,34 @@
  */
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { createBookmarksStore } from './bookmarkStore.ts'
+import { filterByBookmarks, isBookmarked } from './bookmark-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
+import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 
 /**
  * F3 inject face: the rail entry registers an `inject` factory (index.ts)
  * binding the session-bound `loadOlder` action (see railInject.ts); the
  * framework spreads it onto the props at render time.
+ *
+ * T10 store seat: `index.ts` declares `store: createBookmarksStore`, so the
+ * framework instantiates a per-session bookmarks store and injects the
+ * `useStore` selector hook + baked `actions` onto the props via
+ * `PropsStore<H>` (`H` = the store handle the factory returns).
  */
-export type MilestoneRailProps = PropsRuntime<'milestone.rail'> & InjectFace<{ loadOlder: () => Promise<void> }>
+export type MilestoneRailProps = PropsRuntime<'milestone.rail'> &
+  InjectFace<{ loadOlder: () => Promise<void> }> &
+  PropsStore<ReturnType<typeof createBookmarksStore>>
 
 /** Minimum user messages before the rail adds value. */
 const MIN_MARKS = 2
 const PREVIEW_LENGTH = 80
+/** Stable no-bookmarks fallback for render paths without the store seat. */
+const NO_BOOKMARKS: readonly string[] = []
 /** Visual dot diameter (px). */
 const DOT_SIZE = 12
 /** Hit area per dot (px) — larger than the dot for comfortable clicking. */
@@ -84,7 +96,8 @@ interface RailBox {
   readonly right: number
 }
 
-interface HoverInfo {
+/** Hovered-dot metadata fed to the hover tooltip (MilestoneRailTooltip). */
+export interface HoverInfo {
   readonly mark: MilestoneMark
   readonly index: number
   readonly total: number
@@ -111,15 +124,6 @@ function findRow(key: string): HTMLElement | null {
 /** Extract a plain-text hover preview (first 80 chars) from a ContentBlock[]. */
 function extractPreview(content: unknown): string {
   return extractText(content).slice(0, PREVIEW_LENGTH)
-}
-
-/** Relative wall-clock label for a Unix-epoch-ms timestamp. */
-function formatRelativeTime(time: number): string {
-  const diff = Date.now() - time
-  if (diff < 60_000) return '刚刚'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`
-  return `${Math.floor(diff / 86_400_000)} 天前`
 }
 
 /** Compact duration label (ms). */
@@ -152,9 +156,11 @@ function turnTailOf(turn: unknown): { ttftMs?: number; tokensPerSecond?: number 
 }
 
 /**
- * @param props - session standard kit (useSession, sessionId, useProjection).
+ * @param props - session standard kit (useSession, sessionId, useProjection),
+ * the injected loadOlder action, and the bookmarks store pair (useStore +
+ * actions, injected by the framework from the declared store seat).
  */
-export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
+export function MilestoneRail({ useSession, loadOlder, useStore, actions }: MilestoneRailProps) {
   const order = useSession(s => s.chat.order)
   const nodes = useSession(s => s.chat.nodes)
   const timeline = useSession(s => s.chat.timeline)
@@ -162,6 +168,12 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
   // count available), `loadingOlder` gates the button while a page loads.
   const hasMore = useSession(s => s.hasMore)
   const loadingOlder = useSession(s => s.loadingOlder)
+  // T10: the persisted bookmark key list (toggle order). The framework's
+  // useStore is a uSES-bound selector hook, so this re-renders on every
+  // store mutation. Optional call: the pre-store legacy test mirrors render
+  // the rail without the store seat (useStore undefined) and simply read no
+  // bookmarks.
+  const bookmarkedKeys = useStore?.((s) => s.keys) ?? NO_BOOKMARKS
 
   // Ordered user-message dots. node.kind === 'user' is the append-origin human
   // prompt (steering/context/assistant/tool kinds are skipped).
@@ -189,6 +201,8 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
   const [railBox, setRailBox] = useState<RailBox | null>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
   const [search, setSearch] = useState<SearchState>({ query: '', activePos: 0, panelOpen: false })
+  // T10: bookmarks-only filter — when on, only bookmarked dots render.
+  const [bookmarksOnly, setBookmarksOnly] = useState(false)
   // Roving tabindex (T9): the dot index that owns the single tab stop.
   const [focusIndex, setFocusIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -197,9 +211,20 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
   // the dots so the current one carries the white ring.
   const currentKey = useCurrentAnchor(order)
 
+  // T10: the visible dot list — the full marks list, or (filter on) the
+  // bookmarked subset. EVERY downstream count (search N/M, hover N/M, roving
+  // tab stop) operates on this list so the filtered view stays self-consistent.
+  const displayMarks = useMemo<MilestoneMark[]>(() => {
+    if (!bookmarksOnly) return marks
+    return filterByBookmarks(marks, bookmarkedKeys).visible.map((i) => marks[i])
+  }, [bookmarksOnly, marks, bookmarkedKeys])
+
   // Match list over the FULL message text. Empty query matches everything, so
   // an empty search never dims dots — `hasQuery` gates the dim styling.
-  const { matches } = useMemo(() => filterMarks(marks, search.query), [marks, search.query])
+  const { matches } = useMemo(
+    () => filterMarks(displayMarks, search.query),
+    [displayMarks, search.query],
+  )
   const hasQuery = search.query.trim() !== ''
   const activeMarkIndex = hasQuery && matches.length > 0
     ? matches[Math.min(search.activePos, matches.length - 1)]
@@ -233,12 +258,12 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
     }
   }, [marks.length])
 
-  // Keep the roving tab stop inside the dot list when it shrinks (e.g. a
-  // later filter narrows the marks): an out-of-range focusIndex would leave
-  // the widget with NO tab stop at all.
+  // Keep the roving tab stop inside the dot list when it shrinks (e.g. the
+  // bookmarks-only filter narrows the dots): an out-of-range focusIndex would
+  // leave the widget with NO tab stop at all.
   useLayoutEffect(() => {
-    setFocusIndex((f) => clampIndex(f, marks.length))
-  }, [marks.length])
+    setFocusIndex((f) => clampIndex(f, displayMarks.length))
+  }, [displayMarks.length])
 
   if (railBox === null || marks.length < MIN_MARKS) return null
 
@@ -263,7 +288,7 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
     if (matches.length === 0) return
     const next = nextMatchIndex(search.activePos, matches.length, 1)
     setSearch((s) => ({ ...s, activePos: next }))
-    jump(marks[matches[next]].key)
+    jump(displayMarks[matches[next]].key)
   }
 
   const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
@@ -279,7 +304,7 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
   /** Tab lands on the list itself: hand focus to the dot owning the tab stop. */
   const onListFocus = (e: ReactFocusEvent<HTMLDivElement>): void => {
     if (e.target !== e.currentTarget) return
-    focusDotAt(clampIndex(focusIndex, marks.length))
+    focusDotAt(clampIndex(focusIndex, displayMarks.length))
   }
 
   /**
@@ -289,7 +314,7 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
    * (preventDefault here would swallow it).
    */
   const onListKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
-    const count = marks.length
+    const count = displayMarks.length
     let next: number | null = null
     switch (e.key) {
       case 'ArrowDown': next = nextFocusIndex(focusIndex, count, 1); break
@@ -327,13 +352,27 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
     return {
       mark,
       index,
-      total: marks.length,
+      total: displayMarks.length,
       turnLabel: mark.turn !== undefined ? `第 ${mark.turn} 轮` : null,
       durationLabel,
       reasonLabel,
       ttftLabel,
       tpsLabel,
     }
+  }
+
+  /**
+   * T10: flip a mark's bookmark in the persisted store. The store action is
+   * the write path (the engine persists synchronously). The hover re-assert
+   * forces a re-render so the star reflects the toggled state — production
+   * re-renders through the framework's uSES-bound useStore; the component
+   * test harness injects an unsubscribed selector, so this local re-render is
+   * what syncs the DOM there. Both paths converge on the same fresh snapshot.
+   */
+  const onToggleBookmark = (key: string): void => {
+    // Optional actions: legacy render paths without the store seat no-op.
+    actions?.toggle(key)
+    setHover((h) => (h === null ? h : { ...h }))
   }
 
   const dotPitch = DOT_HIT + DOT_GAP
@@ -387,13 +426,48 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
         </button>
       )}
 
+      <button
+        type="button"
+        data-bookmarks-toggle
+        aria-label="只看收藏"
+        aria-pressed={bookmarksOnly}
+        data-active={bookmarksOnly ? 'true' : undefined}
+        onClick={() => setBookmarksOnly((v) => !v)}
+        style={{
+          width: DOT_HIT,
+          height: DOT_HIT,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: bookmarksOnly ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: bookmarksOnly ? '#9db8ff' : '#8b96ab',
+        }}
+      >
+        <svg
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill={bookmarksOnly ? 'currentColor' : 'none'}
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+        </svg>
+      </button>
+
       <RailSearchUi
         panelTop={railBox.top}
         panelRight={railBox.right + DOT_HIT + 8}
         query={search.query}
         panelOpen={search.panelOpen}
         matches={matches.length}
-        total={marks.length}
+        total={displayMarks.length}
         onToggle={() => setSearch((s) => ({ ...s, panelOpen: !s.panelOpen }))}
         onQueryChange={updateQuery}
         onSearchKeyDown={onSearchKeyDown}
@@ -419,7 +493,7 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
           scrollbarWidth: 'none',
         }}
       >
-        {marks.map((mark, i) => {
+        {displayMarks.map((mark, i) => {
           // markState precedence (current > active > match > dimmed > normal):
           // F2 feeds isCurrent from useCurrentAnchor, so the dot for the row
           // at the viewport top is 'current'. While a query is active the
@@ -427,6 +501,7 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
           // dots — the active match keeps its aria-current); it returns when
           // the query clears. Hover styling wins over every search/position
           // state so hovering a dimmed dot still lights it.
+          const bookmarked = isBookmarked(bookmarkedKeys, mark.key)
           const dotState = markState({
             key: mark.key,
             hasQuery,
@@ -462,7 +537,6 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
                 const rect = e.currentTarget.getBoundingClientRect()
                 setHover({ ...buildHover(mark, i), top: rect.top + rect.height / 2 })
               }}
-              onMouseLeave={() => setHover(null)}
               onClick={() => jump(mark.key)}
               data-rail-dot
               tabIndex={focusIndex === i ? 0 : -1}
@@ -483,6 +557,7 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
                   transform: `scale(${isHovered ? 1.35 : dotState === 'active' || dotState === 'current' ? 1.25 : 1})`,
                   opacity: isHovered || dotState !== 'dimmed' ? 1 : 0.22,
                 }}
+                data-bookmarked={bookmarked ? 'true' : undefined}
               />
             </button>
           )
@@ -490,40 +565,17 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
       </div>
 
       {hover !== null && (
-        <div
-          style={{
-            position: 'fixed',
-            right: railBox.right + DOT_HIT + 8,
-            top: hover.top,
-            transform: 'translateY(-50%)',
-            maxWidth: 300,
-            minWidth: 180,
-            padding: '8px 12px',
-            background: 'rgba(20, 24, 32, 0.96)',
-            color: '#e6e8ee',
-            borderRadius: 8,
-            fontSize: 12,
-            lineHeight: 1.6,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            boxShadow: '0 6px 20px rgba(0, 0, 0, 0.4)',
-            zIndex: 101,
-            pointerEvents: 'none',
-          }}
-        >
-          <div style={{ display: 'flex', gap: 8, color: '#9aa4b8', fontSize: 11, marginBottom: 4 }}>
-            <span>第 {hover.index + 1} / {hover.total} 条</span>
-            {hover.turnLabel !== null && <span>{hover.turnLabel}</span>}
-          </div>
-          <div style={{ color: '#c7cede' }}>{hover.mark.preview !== '' ? hover.mark.preview : '（无文本）'}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 11, marginTop: 4 }}>
-            <span>{formatRelativeTime(hover.mark.time)}</span>
-            {hover.durationLabel !== null && <span>用时 {hover.durationLabel}</span>}
-            {hover.reasonLabel !== null && <span>{hover.reasonLabel}</span>}
-            {hover.ttftLabel !== null && <span>首字 {hover.ttftLabel}</span>}
-            {hover.tpsLabel !== null && <span>{hover.tpsLabel}</span>}
-          </div>
-        </div>
+        <MilestoneRailTooltip
+          panelRight={railBox.right + DOT_HIT + 8}
+          hover={hover}
+          bookmarked={isBookmarked(bookmarkedKeys, hover.mark.key)}
+          onToggleBookmark={() => onToggleBookmark(hover.mark.key)}
+          // Hover stability (T10): entering the tooltip keeps hover set
+          // (the dot no longer clears it on mouse-leave — the cursor must
+          // cross the rail→tooltip gap); leaving the tooltip dismisses it.
+          onMouseEnter={() => setHover((h) => h)}
+          onMouseLeave={() => setHover(null)}
+        />
       )}
 
       {showLoadOlder && (

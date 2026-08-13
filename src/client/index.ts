@@ -19,6 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { MilestoneOverlay } from './MilestoneOverlay.tsx'
 import { MilestoneRail } from './MilestoneRail.tsx'
+import { createBookmarksStore } from './bookmarkStore.ts'
 import { createLoadOlder } from './railInject.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -53,11 +54,17 @@ export function apply(ctx: ClientContext): void {
     MilestoneOverlay,
   ))
   ctx.slots.inject('milestone.rail', () => ctx.slots.register(
-    // F3: session-scoped inject face — the rail receives a binding-safe
-    // `loadOlder` action for its own session (railInject.ts). `ctx.sessions`
-    // (ISessions) satisfies the structural SessionsLike face directly.
+    // T10: store seat — a store FACTORY (framework instantiates per session
+    // scope and injects the `useStore` selector hook + baked `actions` onto
+    // the component props via PropsStore<H>). F3: session-scoped inject face
+    // — the rail receives a binding-safe `loadOlder` action for its own
+    // session (railInject.ts). `ctx.sessions` (ISessions) satisfies the
+    // structural SessionsLike face directly. The inject factory keeps its
+    // single-parameter shape: the framework appends the baked store actions
+    // as a second positional arg, which a one-arg factory simply ignores.
     {
       name: 'milestone.rail',
+      store: createBookmarksStore,
       inject: (sessionId) => ({ loadOlder: createLoadOlder(ctx.sessions, sessionId) }),
     },
     MilestoneRail,
