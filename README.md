@@ -51,8 +51,11 @@
 ## 快速开始
 
 ```sh
-# 安装插件到某个 profile
+# 从 npm 安装（推荐）
 dsh plugin --profile demo add dsh-milestone
+
+# 或从 GitHub 源码安装
+dsh plugin --profile demo add "github:SnowCrescenter-tech/dsh-milestone#main"
 
 # 启动 Web UI
 npx @deepseek-ai/dsh web    # → http://127.0.0.1:3080
