@@ -20,23 +20,30 @@ export interface FixtureTextBlock {
   text: string
 }
 
-/** One user message as stored in the Map-backed chat node store. */
-export interface FixtureUserNode {
+/** One node in the Map-backed chat node store (any kind, loosely typed). */
+export interface FixtureNode {
   key: string
-  kind: 'user'
+  kind: string
   id: string
   target: 'chat'
   anchorSeq: number
   /** turn carried inline so the component can read `location.turn.turn`. */
   location: { kind: 'turn'; turn: { turn: number } }
   visibility: 'visible'
+  /** Loose payload — the shape varies by node kind. */
+  data: unknown
+}
+
+/** A user message node (the tightest shape MilestoneRail reads). */
+export interface FixtureUserNode extends FixtureNode {
+  kind: 'user'
   data: { seq: number; time: number; content: readonly FixtureTextBlock[] }
 }
 
 /** Map-backed chat node store (mirrors the harness ChatNodeStore contract). */
 export interface FixtureNodeStore {
-  get(key: string): FixtureUserNode | undefined
-  values(): readonly FixtureUserNode[]
+  get(key: string): FixtureNode | undefined
+  values(): readonly FixtureNode[]
 }
 
 /** Structural mirror of the harness ConversationSnapshot. */
@@ -59,7 +66,7 @@ export interface ConversationSnapshotFixture {
   nodes: readonly { kind: 'user'; seq: number; time: number; content: readonly FixtureTextBlock[]; source: null }[]
   turnTimings: ReadonlyMap<number, unknown>
   turnEnds: ReadonlyMap<number, number>
-  partial: null
+  partial: Readonly<{ content: readonly FixtureTextBlock[] }> | null
   runningCalls: readonly unknown[]
   pending: readonly unknown[]
   queue: readonly unknown[]
@@ -80,6 +87,14 @@ export interface BuildSnapshotOptions {
   users?: { key: string; seq: number; time: number; text: string }[]
   hasMore?: boolean
   loadingOlder?: boolean
+  /** Extra chat nodes (turn-error / turn-max-tokens / model-retry) appended to order + store. */
+  nodes?: { key: string; kind: string; turn: number; retryState?: string }[]
+  /** Stamp a non-empty `pending` array. */
+  pending?: boolean
+  /** Stamp `running` = true. */
+  running?: boolean
+  /** Stamp a non-null `partial` payload. */
+  partial?: boolean
 }
 
 /** Default two-user conversation so a bare call already yields ≥2 marks. */
@@ -88,7 +103,7 @@ const DEFAULT_USERS = [
   { key: '13:user<msg-2>', seq: 2, time: 1_700_000_060_000, text: '再检查一下边界条件' },
 ]
 
-function makeNodeStore(nodes: readonly FixtureUserNode[]): FixtureNodeStore {
+function makeNodeStore(nodes: readonly FixtureNode[]): FixtureNodeStore {
   const map = new Map(nodes.map((node) => [node.key, node]))
   return {
     get: (key: string) => map.get(key),
@@ -103,16 +118,29 @@ function makeNodeStore(nodes: readonly FixtureUserNode[]): FixtureNodeStore {
  */
 export function buildSnapshot(opts: BuildSnapshotOptions = {}): ConversationSnapshotFixture {
   const users = opts.users ?? DEFAULT_USERS
-  const chatNodes: FixtureUserNode[] = users.map((user, i) => ({
-    key: user.key,
-    kind: 'user',
-    id: user.key,
-    target: 'chat',
-    anchorSeq: user.seq,
-    location: { kind: 'turn', turn: { turn: i + 1 } },
-    visibility: 'visible',
-    data: { seq: user.seq, time: user.time, content: [{ type: 'text', text: user.text }] },
-  }))
+  const extraNodes = opts.nodes ?? []
+  const chatNodes: FixtureNode[] = [
+    ...users.map((user, i) => ({
+      key: user.key,
+      kind: 'user' as const,
+      id: user.key,
+      target: 'chat' as const,
+      anchorSeq: user.seq,
+      location: { kind: 'turn' as const, turn: { turn: i + 1 } },
+      visibility: 'visible' as const,
+      data: { seq: user.seq, time: user.time, content: [{ type: 'text' as const, text: user.text }] },
+    })),
+    ...extraNodes.map((extra) => ({
+      key: extra.key,
+      kind: extra.kind,
+      id: extra.key,
+      target: 'chat' as const,
+      anchorSeq: extra.turn,
+      location: { kind: 'turn' as const, turn: { turn: extra.turn } },
+      visibility: 'visible' as const,
+      data: extra.retryState === undefined ? {} : { retryState: extra.retryState },
+    })),
+  ]
   const legacyNodes = users.map((user) => ({
     kind: 'user' as const,
     seq: user.seq,
@@ -124,7 +152,7 @@ export function buildSnapshot(opts: BuildSnapshotOptions = {}): ConversationSnap
     sessionId: 'fixture-session',
     views: { get: () => undefined },
     chat: {
-      order: users.map((user) => user.key),
+      order: [...users.map((user) => user.key), ...extraNodes.map((extra) => extra.key)],
       nodes: makeNodeStore(chatNodes),
       locations: { getTurn: () => [], getStep: () => [] },
       timeline: { turnOrder: users.map((_, i) => i + 1), turns: new Map() },
@@ -139,11 +167,11 @@ export function buildSnapshot(opts: BuildSnapshotOptions = {}): ConversationSnap
     nodes: legacyNodes,
     turnTimings: new Map(),
     turnEnds: new Map(),
-    partial: null,
+    partial: opts.partial ? { content: [{ type: 'text' as const, text: 'fixture-partial' }] } : null,
     runningCalls: [],
-    pending: [],
+    pending: opts.pending ? [{ key: 'fixture-pending' }] : [],
     queue: [],
-    running: false,
+    running: opts.running ?? false,
     subagent: null,
     composerPhase: 'active',
     removed: false,
