@@ -33,6 +33,9 @@
 - **站内搜索** —— 搜索框过滤圆点，匹配的是**完整消息内容**（不是 80 字摘要），实时显示命中数 N/M，回车跳到下一个匹配，Esc 一键清空。
 - **当前位置高亮** —— 滚动会话时，离你视口最近的那条提问会亮起白环，永远知道「读到哪了」。
 - **加载更早** —— 历史没加载完时，顶部出现「···」按钮，点一下继续加载，并提示当前已显示多少条。
+- **收藏书签** —— 悬停任意圆点可点星收藏，刷新后仍保留；顶部「★」一键只看收藏，把一次性跳转变反复回访。
+- **键盘导航** —— 里程碑条是一个焦点组件：↑↓ 移动、回车跳转、Home/End 首尾，全程不用鼠标。
+- **状态徽章** —— 圆点自动标出轮次健康状态：出错红环、达到上限黄环、重试橙环、运行中/等待输入蓝/黄脉冲。
 - **固定间距** —— 圆点**等距排列**，不随对话长度挤压变形，永远点得准。
 - **蓝色渐变** —— 最新最深、最早最浅，一眼看清提问的先后顺序，像 Git 提交图。
 - **滚轮滑动** —— 长会话圆点超出可视区时，鼠标在里程碑条上滚轮即可滑动选点。
@@ -79,7 +82,8 @@ shell.overlay (root scope)
 ```
 
 - **注入点**：`shell.overlay` —— 全框架浮动层，附加式、点击穿透，不影响任何现有 UI。
-- **数据源**：`chat.order` + `chat.nodes`（user 消息）+ `chat.timeline`（turn 元数据）+ `hasMore`/`loadingOlder`（分页状态）+ `loadOlder`（经 inject face 注入）。
+- **数据源**：`chat.order` + `chat.nodes`（user 消息 + `turn-error`/`turn-max-tokens`/`model-retry` 节点）+ `chat.timeline`（turn 元数据）+ `hasMore`/`loadingOlder`（分页）+ `running`/`pending`（徽章）+ `loadOlder`（inject face）。
+- **书签持久化**：harness `store.persist`（每会话 localStorage，key `dsh-milestone.bookmarks.<sessionId>`），经 `defineStore` 引擎读写。
 - **跳转**：DOM 锚点 `data-chat-anchor-key`，`scrollIntoView` 平滑定位。
 - **纯函数**：搜索过滤 / 位置计算 / 圆点状态都在 `rail-logic.ts` 纯函数里，单测覆盖。
 
@@ -87,6 +91,9 @@ shell.overlay (root scope)
 
 - 搜索范围 = 当前已加载的消息窗口（初始 50 条；点顶部「···」加载更早，更早的历史需先加载进来才能被搜到）。
 - TTFT / tokens/秒 依赖 turn 位置数据，窗口外或未完成的 turn 不显示（自动隐藏）。
+- 徽章的瞬态状态（运行中/等待输入）只点亮**最新一条可见提问**——若运行中/等待输入的轮次其提问在窗口外，则无脉冲。
+- 书签按**会话**隔离（不跨会话共享）。
+- 尚无全局快捷键聚焦里程碑条（需 Tab 键切换到）。
 
 ## License
 
