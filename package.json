@@ -1,7 +1,7 @@
 {
   "name": "dsh-milestone",
   "version": "0.2.1",
-  "description": "Git-style milestone timeline for DeepSeek Harness: a fixed-pitch dot rail beside the conversation — hover for rich metadata, click to jump to any message.",
+  "description": "Git-style milestone timeline for DeepSeek Harness: hover for metadata, click to jump to any message. 会话里程碑导航条：圆点时间线，定位并跳转到每条提问。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
