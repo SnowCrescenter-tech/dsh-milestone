@@ -1,7 +1,7 @@
 {
   "name": "dsh-milestone",
   "version": "0.1.0",
-  "description": "Conversation milestone rail for DeepSeek Harness: a right-side vertical scrubber showing one tick per user message — hover to preview, click to jump.",
+  "description": "Git-style milestone timeline for DeepSeek Harness: a fixed-pitch dot rail beside the conversation — hover for rich metadata, click to jump to any message.",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

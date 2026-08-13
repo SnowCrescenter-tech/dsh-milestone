@@ -1,76 +1,90 @@
-# dsh-milestone
+<div align="center">
 
-会话里程碑导航条（DeepSeek Harness 插件）。在会话视图右侧渲染一条 **固定间距的圆点时间线**（类似 git 提交图），每个 **user 发言** 对应一个蓝色渐变圆点：悬停显示时间/轮次/耗时/原因/首字延迟等元信息，点击平滑跳转，长会话可滚轮滑动选点。
+# 🧭 dsh-milestone
 
-> **dsh-plugin** · 适配 DeepSeek Harness (`deepseek-ai/deepseek-harness`) Web UI。
+**DeepSeek Harness 的会话里程碑导航条**
 
-## 功能
+像 Git 提交图一样，一眼定位每一次提问，一键跳转到任何位置。
 
-- **固定间距圆点**：每条真实 user 消息 = 一个圆点，**等距排列**（不随对话长度等比缩放），方便点击。
-- **蓝色渐变**：圆点按先后渐变（最新最深 → 最早最浅），一眼区分新旧，类似 git 提交图。
-- **滚轮滑动**：长会话圆点超出可视区时，鼠标在里程碑条上滚轮即可滑动选点。
-- **丰富悬停**：hover 显示消息预览 + 相对时间 + 第 N/M 条 + 第 N 轮 + 用时 + 结束原因 + 首字延迟(TTFT) + tokens/秒。
-- **点击跳转**：点击圆点平滑滚动到对应消息（`scrollIntoView`）。
-- 少于 2 条 user 消息时不渲染（无导航价值）。
+<p>
+  <a href="https://www.npmjs.com/package/dsh-milestone"><img src="https://img.shields.io/npm/v/dsh-milestone?color=2563eb" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-milestone"><img src="https://img.shields.io/npm/dm/dsh-milestone" alt="npm downloads"></a>
+  <a href="./LICENSE"><img src="https://img.shields.io/npm/l/dsh-milestone" alt="license"></a>
+  <a href="https://github.com/topics/dsh-plugin"><img src="https://img.shields.io/badge/topic-dsh--plugin-2563eb" alt="dsh-plugin"></a>
+</p>
 
-## 安装
+</div>
+
+---
+
+## 为什么需要它？
+
+和 AI 聊了上百轮之后，想找回**第 17 轮那个提问**？你只能不停滚轮往上翻，眼睛在一堆代码块、工具调用和思考过程里大海捞针。
+
+**dsh-milestone** 在会话右侧挂一条**圆点时间线**——每一条提问对应一个圆点，鼠标悬停看内容，点击瞬间跳转。长对话的"导航地图"。
+
+<img src="./assets/demo.svg" alt="dsh-milestone 效果示意图" width="100%">
+
+## 好用在哪？
+
+- ⚡ **一键定位** —— 点击任意圆点，平滑滚动到那条消息，不用再手动翻几百行。
+- 📏 **固定间距** —— 圆点**等距排列**，不随对话长度挤压变形，永远点得准。
+- 🎨 **蓝色渐变** —— 最新最深、最早最浅，一眼看清提问的先后顺序，像 Git 提交图。
+- 🖱️ **滚轮滑动** —— 长会话圆点超出可视区时，鼠标在里程碑条上滚轮即可滑动选点。
+- 💬 **丰富悬停** —— 悬停展示消息预览、相对时间、第 N 轮、用时、结束原因、首字延迟(TTFT)、tokens/秒。
+- 🪶 **零侵入** —— 官方 slot 机制挂载，不修改 harness 源码，装完即用。
+
+## 悬停能看到什么
+
+```
+┌─────────────────────────────────────────┐
+│ 第 3 / 5 条 · 第 2 轮                     │  ← 序号 + 轮次
+│ 帮我优化这段代码的性能                    │  ← 消息预览（前 80 字）
+│ 5 分钟前 · 用时 1m30s · 首字 1.2s · 12.4 tok/s │  ← 时间 · 耗时 · TTFT · 吞吐
+└─────────────────────────────────────────┘
+```
+
+元信息全部来自 harness 原生的 session 快照（`turnTimings` / `timeline.turns` / `turn-tail`），无额外依赖。
+
+## 快速开始
 
 ```sh
-# 本地目录（开发）
-dsh plugin --profile demo add ./dsh-milestone
-
-# npm 包（发布后）
+# 安装插件到某个 profile
 dsh plugin --profile demo add dsh-milestone
 
-# GitHub 仓库（需 prepare 脚本 + allowBuilds 许可）
-dsh plugin --profile demo add github:you/dsh-milestone
+# 启动 Web UI
+npx @deepseek-ai/dsh web    # → http://127.0.0.1:3080
 ```
 
-然后 `npx @deepseek-ai/dsh web` 启动 Web UI 即可看到右侧里程碑条。
+打开一个**多轮对话**（至少 2 条提问），会话视图右侧就会出现里程碑条。
 
-## 开发
+> 要求 Node.js `>= 24`（harness 官方要求）。
 
-要求 **Node.js `>= 24`**（官方 harness 要求 `^22.19 || >=24`，本仓库已验证 `24.19.0`）。依赖从 npm 安装（`0.1.0-rc.6` 系列，完整可用）。
+## 它是什么做的？
 
-```sh
-pnpm install
-pnpm run build       # 产出 lib/index.js (node half) + lib/client.js (browser half)
-pnpm exec tsc --noEmit   # 类型检查
-pnpm run watch       # 监听构建
-```
-
-构建产物：`lib/index.js`（node half，空 apply）+ `lib/client.js`（browser half，CJS closure，`window.__ModuleLoader__.load` banner）。
-
-### 架构
-
-双半边插件（Host = Node 进程，Client = 浏览器）：
+双半边浏览器插件（空 node half + `shell.overlay` slot 挂载的 client half）：
 
 ```
-src/index.ts            node half —— 空 apply，让插件进入 host cordis 配置树
-src/client/index.ts     browser half —— 两个 slot 注册
-src/client/MilestoneOverlay.tsx  shell.overlay entry（root scope）
-                                   └─ 声明 session 子槽 milestone.rail
-                                   └─ 通过 SessionProvider 桥接到会话区
-src/client/MilestoneRail.tsx      milestone.rail entry（session scope）
-                                   └─ useSession 读取会话快照
-                                   └─ DOM 锚点定位 + tick 渲染 + 跳转
+shell.overlay (root scope)
+  └─ milestone.rail (session scope, 自声明子槽)
+       └─ useSession 读取会话快照 → 圆点列表 + 悬停 + 跳转
 ```
 
-关键机制：
-
-- **注入点**：`shell.overlay`（`kind: 'list'`，`scope: 'root'`）——全框架浮动层，附加式、点击穿透，是"悬浮 rail"的唯一正确位置。
-- **会话数据**：通过声明 session-scope 子槽 `milestone.rail`，框架自动注入 `SessionProvider`（`PropsRenderSlots` 从子槽 scope 推导），rail 组件因此拿到 `useSession` / `sessionId`。
-- **圆点列表**：`useSession(s => s.chat.order)` + `s.chat.nodes.get(key)` 过滤 `kind === 'user'`，取节点 `key`（DOM 锚点）与 `location.turn`。
-- **悬停元数据**：`s.chat.timeline.turns.get(turn)` 提供 turn 起止时间/状态/结束原因；`turn.data.get('turn-tail')` 提供 TTFT 与 tokens/秒（ui-conversation 发布的 location data）。
-- **跳转**：DOM 锚点 `data-chat-anchor-key`（节点 key = `13:input-message<messageId>`），scrollport 为 `[data-conversation-scroll]`。
+- **注入点**：`shell.overlay` —— 全框架浮动层，附加式、点击穿透，不影响任何现有 UI。
+- **数据源**：`chat.order` + `chat.nodes`（user 消息）+ `chat.timeline`（turn 元数据）。
+- **跳转**：DOM 锚点 `data-chat-anchor-key`，`scrollIntoView` 平滑定位。
 
 ## 已知限制
 
-- 仅覆盖当前已加载的消息窗口（harness 初始加载最近 50 条事件，向上滚动触发 `loadOlder` 分页）；rail 会随分页自动更新，但更早的消息需要先滚动加载。
-- preview 从消息 `content` 文本块提取，长消息截断为 80 字。
-- TTFT / tokens/秒 依赖 turn-tail 位置数据，窗口外或未完成的 turn 不会显示（自动隐藏）。
-- 尚未实现"当前定位"高亮（P1，已有蓝色渐变区分先后）。
+- 仅覆盖当前已加载的消息窗口（初始 50 条，向上滚动分页会自动补圆点）。
+- TTFT / tokens/秒 依赖 turn 位置数据，窗口外或未完成的 turn 不显示（自动隐藏）。
 
 ## License
 
-MIT
+[MIT](./LICENSE)
+
+---
+
+<p align="center">
+  觉得好用？给个 ⭐ 支持一下，或把它推荐给正在 DeepSeek Harness 里挣扎的开发者吧。
+</p>
