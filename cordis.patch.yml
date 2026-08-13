@@ -1,0 +1,6 @@
+# dsh-milestone bundle patch: one loader row per package half.
+# The row `name` is this package itself, so the web modules scanner discovers
+# the browser half through the `dsh.client` declaration in package.json.
+- insert:
+    - id: milestone
+      name: dsh-milestone

@@ -1,0 +1,21 @@
+# dependencies
+node_modules/
+
+# build output
+lib/
+dist/
+*.tsbuildinfo
+
+# tool artifacts
+.codegraph/
+.omo/
+
+# local node runtime (dev tool, not part of the plugin)
+node-v24.19.0-win-x64/
+
+# system
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
