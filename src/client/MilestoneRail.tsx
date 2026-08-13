@@ -31,9 +31,10 @@
  * `loadingOlder`), and a compact hint to the rail's left states how many
  * messages the current window covers.
  */
-import { useLayoutEffect, useMemo, useState } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
@@ -188,6 +189,9 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
   const [railBox, setRailBox] = useState<RailBox | null>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
   const [search, setSearch] = useState<SearchState>({ query: '', activePos: 0, panelOpen: false })
+  // Roving tabindex (T9): the dot index that owns the single tab stop.
+  const [focusIndex, setFocusIndex] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null)
   // F2: the user message at/just above the conversation viewport top. Changes
   // whenever the scrollport scrolls (or the message set reorders), re-rendering
   // the dots so the current one carries the white ring.
@@ -229,6 +233,13 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
     }
   }, [marks.length])
 
+  // Keep the roving tab stop inside the dot list when it shrinks (e.g. a
+  // later filter narrows the marks): an out-of-range focusIndex would leave
+  // the widget with NO tab stop at all.
+  useLayoutEffect(() => {
+    setFocusIndex((f) => clampIndex(f, marks.length))
+  }, [marks.length])
+
   if (railBox === null || marks.length < MIN_MARKS) return null
 
   const jump = (key: string): void => {
@@ -258,6 +269,39 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
   const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter') advanceMatch()
     if (e.key === 'Escape') closeSearch()
+  }
+
+  /** Focus the dot at `index` (no-op while the list is unmounted). */
+  const focusDotAt = (index: number): void => {
+    listRef.current?.querySelectorAll<HTMLElement>('[data-rail-dot]')[index]?.focus()
+  }
+
+  /** Tab lands on the list itself: hand focus to the dot owning the tab stop. */
+  const onListFocus = (e: ReactFocusEvent<HTMLDivElement>): void => {
+    if (e.target !== e.currentTarget) return
+    focusDotAt(clampIndex(focusIndex, marks.length))
+  }
+
+  /**
+   * Roving-tabindex keys: ArrowDown/ArrowUp move focus (wrapping), Home/End
+   * jump to first/last. Enter/Space are deliberately NOT handled — the dots
+   * are real buttons, so native activation fires the jump click untouched
+   * (preventDefault here would swallow it).
+   */
+  const onListKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
+    const count = marks.length
+    let next: number | null = null
+    switch (e.key) {
+      case 'ArrowDown': next = nextFocusIndex(focusIndex, count, 1); break
+      case 'ArrowUp': next = nextFocusIndex(focusIndex, count, -1); break
+      case 'Home': next = 0; break
+      case 'End': next = count - 1; break
+      default: return
+    }
+    e.preventDefault()
+    const target = clampIndex(next, count)
+    setFocusIndex(target)
+    focusDotAt(target)
   }
 
   const buildHover = (mark: MilestoneMark, index: number): Omit<HoverInfo, 'top'> => {
@@ -357,6 +401,12 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
       />
 
       <div
+        ref={listRef}
+        data-rail-list
+        tabIndex={0}
+        aria-label="会话里程碑列表"
+        onFocus={onListFocus}
+        onKeyDown={onListKeyDown}
         style={{
           flex: 1,
           minHeight: 0,
@@ -414,6 +464,9 @@ export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
               }}
               onMouseLeave={() => setHover(null)}
               onClick={() => jump(mark.key)}
+              data-rail-dot
+              tabIndex={focusIndex === i ? 0 : -1}
+              onFocus={() => setFocusIndex(i)}
               aria-label={`跳转到第 ${i + 1} 条消息`}
               aria-current={dotState === 'active' ? 'true' : undefined}
               data-current={dotState === 'current' ? 'true' : undefined}
