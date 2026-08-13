@@ -20,12 +20,17 @@
  * the dots (non-matches dim), Enter cycles the active match (wrapping) and
  * jumps to it, Escape clears and closes. Matching runs over the FULL message
  * text (`text` from rail-logic.extractText), not the truncated hover preview.
+ *
+ * Current-position highlight (F2): the dot for the user message at/just above
+ * the conversation viewport top carries a white ring (`useCurrentAnchor`
+ * observes the scrollport, no polling).
  */
 import { useLayoutEffect, useMemo, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
+import { useCurrentAnchor } from './useCurrentAnchor.ts'
 
 export type MilestoneRailProps = PropsRuntime<'milestone.rail'>
 
@@ -168,6 +173,10 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
   const [railBox, setRailBox] = useState<RailBox | null>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
   const [search, setSearch] = useState<SearchState>({ query: '', activePos: 0, panelOpen: false })
+  // F2: the user message at/just above the conversation viewport top. Changes
+  // whenever the scrollport scrolls (or the message set reorders), re-rendering
+  // the dots so the current one carries the white ring.
+  const currentKey = useCurrentAnchor(order)
 
   // Match list over the FULL message text. Empty query matches everything, so
   // an empty search never dims dots — `hasQuery` gates the dim styling.
@@ -312,22 +321,28 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
         }}
       >
         {marks.map((mark, i) => {
-          // markState precedence (current > active > match > dimmed > normal);
-          // F2 will feed isCurrent — F1 leaves it false. Hover styling wins
-          // over every search state so hovering a dimmed dot still lights it.
+          // markState precedence (current > active > match > dimmed > normal):
+          // F2 feeds isCurrent from useCurrentAnchor, so the dot for the row
+          // at the viewport top is 'current'. While a query is active the
+          // position ring stands down (search match/active states own the
+          // dots — the active match keeps its aria-current); it returns when
+          // the query clears. Hover styling wins over every search/position
+          // state so hovering a dimmed dot still lights it.
           const dotState = markState({
             key: mark.key,
             hasQuery,
             isMatch: matches.includes(i),
             isActive: i === activeMarkIndex,
-            isCurrent: false,
+            isCurrent: !hasQuery && mark.key === currentKey,
           })
           const isHovered = hover?.mark.key === mark.key
           const boxShadow = isHovered
             ? '0 0 0 3px rgba(77, 124, 254, 0.35)'
             : dotState === 'active'
               ? '0 0 0 3px rgba(255, 255, 255, 0.9)'
-              : 'none'
+              : dotState === 'current'
+                ? '0 0 0 3px rgba(255, 255, 255, 0.75)'
+                : 'none'
           return (
             <button
               key={mark.key}
@@ -352,6 +367,7 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
               onClick={() => jump(mark.key)}
               aria-label={`跳转到第 ${i + 1} 条消息`}
               aria-current={dotState === 'active' ? 'true' : undefined}
+              data-current={dotState === 'current' ? 'true' : undefined}
               data-dimmed={dotState === 'dimmed' ? 'true' : undefined}
             >
               <span
@@ -362,7 +378,7 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
                   background: dotColor(i, marks.length),
                   boxShadow,
                   transition: 'transform 120ms ease, opacity 120ms ease',
-                  transform: `scale(${isHovered ? 1.35 : dotState === 'active' ? 1.25 : 1})`,
+                  transform: `scale(${isHovered ? 1.35 : dotState === 'active' || dotState === 'current' ? 1.25 : 1})`,
                   opacity: isHovered || dotState !== 'dimmed' ? 1 : 0.22,
                 }}
               />
