@@ -24,15 +24,26 @@
  * Current-position highlight (F2): the dot for the user message at/just above
  * the conversation viewport top carries a white ring (`useCurrentAnchor`
  * observes the scrollport, no polling).
+ *
+ * Load-older + window coverage (F3): when the session still has earlier pages
+ * (`hasMore`) a slim `···` button sits at the rail top and triggers the
+ * injected `loadOlder` action (disabled + `data-loading-older` while
+ * `loadingOlder`), and a compact hint to the rail's left states how many
+ * messages the current window covers.
  */
 import { useLayoutEffect, useMemo, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 
-export type MilestoneRailProps = PropsRuntime<'milestone.rail'>
+/**
+ * F3 inject face: the rail entry registers an `inject` factory (index.ts)
+ * binding the session-bound `loadOlder` action (see railInject.ts); the
+ * framework spreads it onto the props at render time.
+ */
+export type MilestoneRailProps = PropsRuntime<'milestone.rail'> & InjectFace<{ loadOlder: () => Promise<void> }>
 
 /** Minimum user messages before the rail adds value. */
 const MIN_MARKS = 2
@@ -142,10 +153,14 @@ function turnTailOf(turn: unknown): { ttftMs?: number; tokensPerSecond?: number 
 /**
  * @param props - session standard kit (useSession, sessionId, useProjection).
  */
-export function MilestoneRail({ useSession }: MilestoneRailProps) {
+export function MilestoneRail({ useSession, loadOlder }: MilestoneRailProps) {
   const order = useSession(s => s.chat.order)
   const nodes = useSession(s => s.chat.nodes)
   const timeline = useSession(s => s.chat.timeline)
+  // F3: the conversation paging window. `hasMore` is boolean (no absolute
+  // count available), `loadingOlder` gates the button while a page loads.
+  const hasMore = useSession(s => s.hasMore)
+  const loadingOlder = useSession(s => s.loadingOlder)
 
   // Ordered user-message dots. node.kind === 'user' is the append-origin human
   // prompt (steering/context/assistant/tool kinds are skipped).
@@ -278,6 +293,10 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
   }
 
   const dotPitch = DOT_HIT + DOT_GAP
+  // F3: an earlier page exists and the rail is rendered (marks >= MIN_MARKS is
+  // already guaranteed past the early return above; kept explicit so the
+  // affordance's precondition reads as one named fact).
+  const showLoadOlder = hasMore && marks.length >= MIN_MARKS
 
   return (
     <div
@@ -294,6 +313,36 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
       }}
       aria-label="会话里程碑"
     >
+      {showLoadOlder && (
+        <button
+          type="button"
+          data-load-older
+          data-loading-older={loadingOlder ? 'true' : undefined}
+          title="加载更早消息"
+          aria-label="加载更早消息"
+          disabled={loadingOlder}
+          onClick={() => { void loadOlder() }}
+          style={{
+            width: DOT_HIT,
+            height: DOT_HIT,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: loadingOlder ? 'default' : 'pointer',
+            color: loadingOlder ? '#5a6375' : '#8b96ab',
+            fontSize: 11,
+            lineHeight: 1,
+            letterSpacing: 1,
+          }}
+        >
+          ···
+        </button>
+      )}
+
       <RailSearchUi
         panelTop={railBox.top}
         panelRight={railBox.right + DOT_HIT + 8}
@@ -421,6 +470,26 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
             {hover.ttftLabel !== null && <span>首字 {hover.ttftLabel}</span>}
             {hover.tpsLabel !== null && <span>{hover.tpsLabel}</span>}
           </div>
+        </div>
+      )}
+
+      {showLoadOlder && (
+        <div
+          data-window-hint
+          style={{
+            position: 'absolute',
+            bottom: 6,
+            right: '100%',
+            marginRight: 8,
+            whiteSpace: 'nowrap',
+            fontSize: 10,
+            lineHeight: 1,
+            color: 'rgba(139, 150, 171, 0.9)',
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        >
+          已显示 {marks.length} 条 · 还有更早
         </div>
       )}
     </div>

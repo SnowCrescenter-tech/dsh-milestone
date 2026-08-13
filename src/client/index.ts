@@ -19,6 +19,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { MilestoneOverlay } from './MilestoneOverlay.tsx'
 import { MilestoneRail } from './MilestoneRail.tsx'
+import { createLoadOlder } from './railInject.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -52,7 +53,13 @@ export function apply(ctx: ClientContext): void {
     MilestoneOverlay,
   ))
   ctx.slots.inject('milestone.rail', () => ctx.slots.register(
-    { name: 'milestone.rail' },
+    // F3: session-scoped inject face — the rail receives a binding-safe
+    // `loadOlder` action for its own session (railInject.ts). `ctx.sessions`
+    // (ISessions) satisfies the structural SessionsLike face directly.
+    {
+      name: 'milestone.rail',
+      inject: (sessionId) => ({ loadOlder: createLoadOlder(ctx.sessions, sessionId) }),
+    },
     MilestoneRail,
   ))
 }
