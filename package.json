@@ -24,7 +24,9 @@
   },
   "scripts": {
     "build": "tsdown",
-    "watch": "tsdown --watch"
+    "watch": "tsdown --watch",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
   },
   "license": "MIT",
   "keywords": [
