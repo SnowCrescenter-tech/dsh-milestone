@@ -1,0 +1,4 @@
+# pnpm 11 defaults minimumReleaseAge to 24h (supply-chain guard for freshly
+# published packages). @deepseek-ai harness packages are published same-day,
+# so relax the guard for this plugin's dependency set.
+minimumReleaseAge: 0
