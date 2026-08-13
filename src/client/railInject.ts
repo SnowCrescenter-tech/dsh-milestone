@@ -9,9 +9,10 @@
  * `session.loadOlder(): Promise<void>` loads the previous message page.
  */
 
-/** Structural sessions-service face — mirrors the harness `ISessions.binding` contract. */
+/** Structural sessions-service face — mirrors the harness `ISessions` contract for `binding` and `fork`. */
 export interface SessionsLike {
   binding(id: string): { session: { loadOlder(): Promise<unknown> } } | undefined
+  fork(opts: { sessionId: string; atSeq?: number; increaseTitle?: boolean }): Promise<string>
 }
 
 /**
@@ -31,4 +32,20 @@ export function createLoadOlder(sessions: SessionsLike, sessionId: string): () =
     if (binding === undefined) return
     await binding.session.loadOlder()
   }
+}
+
+/**
+ * Wrap a session `fork` call into a safe action closure that anchors the cut
+ * at an event seq and always bumps the inherited title.
+ *
+ * - Delegates to `sessions.fork({ sessionId, atSeq, increaseTitle: true })`;
+ *   the resolved child id is passed through.
+ * - A rejection propagates unchanged so callers can surface the fork error.
+ *
+ * @param sessions - the injected sessions service (`ctx.sessions`).
+ * @param sessionId - the session the rail is scoped to.
+ * @returns an action that forks that session at a given event seq.
+ */
+export function createForkAt(sessions: SessionsLike, sessionId: string): (atSeq: number) => Promise<string> {
+  return (atSeq) => sessions.fork({ sessionId, atSeq, increaseTitle: true })
 }

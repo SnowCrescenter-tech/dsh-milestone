@@ -46,14 +46,55 @@ export interface FixtureNodeStore {
   values(): readonly FixtureNode[]
 }
 
+/** Token usage recorded for one assistant request. */
+export interface FixtureUsage {
+  inputTokens?: number
+  outputTokens?: number
+}
+
+/** Provider/model identity of one completed request. */
+export interface FixtureProviderIdentity {
+  provider: string
+  model: string
+}
+
+/** Request config recorded for one provider call. */
+export interface FixtureRequestConfig extends FixtureProviderIdentity {
+  purpose?: string
+}
+
+/** One assistant-step node stamp: a settled assistant reply for a turn. */
+export interface FixtureAssistant {
+  key: string
+  turn: number
+  step?: number
+  usage?: FixtureUsage
+  provenance?: FixtureProviderIdentity
+  requestConfig?: FixtureRequestConfig
+}
+
+/** One entry of the ui-trajectory view request stream. */
+export interface FixtureTrajectoryRequest {
+  turn: number
+  purpose?: string
+  requestConfig?: FixtureRequestConfig
+  provenance?: FixtureProviderIdentity
+  usage?: FixtureUsage
+}
+
+/** The ui-trajectory view payload served from `views.get('trajectory')`. */
+export interface FixtureTrajectoryView {
+  requests: readonly FixtureTrajectoryRequest[]
+}
+
 /** Structural mirror of the harness ConversationSnapshot. */
 export interface ConversationSnapshotFixture {
   sessionId: string
-  views: { get(): undefined }
+  views: { get(key: string): unknown }
   chat: {
     order: readonly string[]
     nodes: FixtureNodeStore
-    locations: { getTurn(): readonly string[]; getStep(): readonly string[] }
+    locations: { getTurn(turn: number): readonly string[]; getStep(): readonly string[] }
     timeline: { turnOrder: readonly number[]; turns: ReadonlyMap<number, unknown> }
     legacy: {
       nodes: readonly { kind: 'user'; seq: number; time: number; content: readonly FixtureTextBlock[]; source: null }[]
@@ -95,6 +136,16 @@ export interface BuildSnapshotOptions {
   running?: boolean
   /** Stamp a non-null `partial` payload. */
   partial?: boolean
+  /**
+   * Turn number per user message, parallel to `users`. Defaults to
+   * `1..users.length`. Drives each user node's `location.turn.turn` and the
+   * `timeline.turnOrder` (first-seen order, deduped).
+   */
+  userTurns?: number[]
+  /** Assistant-step nodes appended to order + store after users/extras. */
+  assistants?: FixtureAssistant[]
+  /** ui-trajectory view payload served from `views.get('trajectory')`. */
+  trajectory?: FixtureTrajectoryView
 }
 
 /** Default two-user conversation so a bare call already yields ≥2 marks. */
@@ -113,12 +164,51 @@ function makeNodeStore(nodes: readonly FixtureNode[]): FixtureNodeStore {
 
 /**
  * Build a full ConversationSnapshot-shaped fixture.
- * @param opts - user messages and paging flags (all optional; see defaults).
+ * @param opts - user messages, assistant-step stamps, trajectory view and
+ *   paging flags (all optional; see defaults).
  * @returns structural snapshot ready for `useSession` selector stubs.
  */
 export function buildSnapshot(opts: BuildSnapshotOptions = {}): ConversationSnapshotFixture {
   const users = opts.users ?? DEFAULT_USERS
   const extraNodes = opts.nodes ?? []
+  const assistants = opts.assistants ?? []
+  const userTurns = opts.userTurns ?? users.map((_, i) => i + 1)
+  const userTimeByTurn = new Map<number, number>()
+  users.forEach((user, i) => userTimeByTurn.set(userTurns[i] ?? i + 1, user.time))
+
+  const assistantNodes: FixtureNode[] = assistants.map((assistant, i) => {
+    const step = assistant.step ?? 1
+    const seq = assistant.turn * 10 + step
+    const time = userTimeByTurn.get(assistant.turn) ?? 1_700_000_000_000 + assistant.turn * 1000 + i
+    return {
+      key: assistant.key,
+      kind: 'assistant-step',
+      id: assistant.key,
+      target: 'chat' as const,
+      anchorSeq: seq,
+      location: { kind: 'turn' as const, turn: { turn: assistant.turn } },
+      visibility: 'visible' as const,
+      data: {
+        status: 'settled',
+        turn: assistant.turn,
+        step,
+        time,
+        usage: assistant.usage,
+        finalNode: {
+          kind: 'assistant' as const,
+          seq,
+          time,
+          turn: assistant.turn,
+          step,
+          blocks: [],
+          usage: assistant.usage,
+          provenance: assistant.provenance,
+          requestConfig: assistant.requestConfig,
+        },
+      },
+    }
+  })
+
   const chatNodes: FixtureNode[] = [
     ...users.map((user, i) => ({
       key: user.key,
@@ -126,7 +216,7 @@ export function buildSnapshot(opts: BuildSnapshotOptions = {}): ConversationSnap
       id: user.key,
       target: 'chat' as const,
       anchorSeq: user.seq,
-      location: { kind: 'turn' as const, turn: { turn: i + 1 } },
+      location: { kind: 'turn' as const, turn: { turn: userTurns[i] ?? i + 1 } },
       visibility: 'visible' as const,
       data: { seq: user.seq, time: user.time, content: [{ type: 'text' as const, text: user.text }] },
     })),
@@ -140,7 +230,19 @@ export function buildSnapshot(opts: BuildSnapshotOptions = {}): ConversationSnap
       visibility: 'visible' as const,
       data: extra.retryState === undefined ? {} : { retryState: extra.retryState },
     })),
+    ...assistantNodes,
   ]
+
+  const keysByTurn = new Map<number, string[]>()
+  for (const node of chatNodes) {
+    const turn = node.location.turn.turn
+    const keys = keysByTurn.get(turn)
+    if (keys === undefined) keysByTurn.set(turn, [node.key])
+    else keys.push(node.key)
+  }
+  const getTurn = (turn: number): readonly string[] => keysByTurn.get(turn) ?? []
+  const turnOrder = [...new Set(userTurns)]
+
   const legacyNodes = users.map((user) => ({
     kind: 'user' as const,
     seq: user.seq,
@@ -150,12 +252,18 @@ export function buildSnapshot(opts: BuildSnapshotOptions = {}): ConversationSnap
   }))
   return {
     sessionId: 'fixture-session',
-    views: { get: () => undefined },
+    views: {
+      get: (key: string) => (key === 'trajectory' ? { requests: opts.trajectory?.requests ?? [] } : undefined),
+    },
     chat: {
-      order: [...users.map((user) => user.key), ...extraNodes.map((extra) => extra.key)],
+      order: [
+        ...users.map((user) => user.key),
+        ...extraNodes.map((extra) => extra.key),
+        ...assistants.map((assistant) => assistant.key),
+      ],
       nodes: makeNodeStore(chatNodes),
-      locations: { getTurn: () => [], getStep: () => [] },
-      timeline: { turnOrder: users.map((_, i) => i + 1), turns: new Map() },
+      locations: { getTurn, getStep: () => [] },
+      timeline: { turnOrder, turns: new Map() },
       legacy: {
         nodes: legacyNodes,
         turnTimings: new Map(),
