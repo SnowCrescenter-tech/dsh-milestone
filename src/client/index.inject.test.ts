@@ -15,9 +15,11 @@ import { inject } from './index.ts'
 
 describe('client index inject contract', () => {
   it('declares every service apply() reads', () => {
-    // apply() reads ctx.slots (register/inject) and ctx.sessions (in the
-    // milestone.rail inject factory → createLoadOlder).
+    // apply() reads ctx.slots (register/inject), ctx.sessions (in the
+    // milestone.rail inject factory → createLoadOlder/createForkAt), and
+    // ctx.locale (the dsh-milestone dictionary registration).
     expect(inject).toContain('slots')
     expect(inject).toContain('sessions')
+    expect(inject).toContain('locale')
   })
 })

@@ -33,7 +33,7 @@
  */
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { InjectFace, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
+import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { badgeRingStyle, deriveBadge } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
@@ -54,8 +54,9 @@ import { useCurrentAnchor } from './useCurrentAnchor.ts'
  * `PropsStore<H>` (`H` = the store handle the factory returns).
  */
 export type MilestoneRailProps = PropsRuntime<'milestone.rail'> &
-  InjectFace<{ loadOlder: () => Promise<void> }> &
-  PropsStore<ReturnType<typeof createBookmarksStore>>
+  InjectFace<{ loadOlder: () => Promise<void>; forkAt: (atSeq: number) => Promise<string> }> &
+  PropsStore<ReturnType<typeof createBookmarksStore>> &
+  PropsLocale<'dsh-milestone'>
 
 /** Minimum user messages before the rail adds value. */
 const MIN_MARKS = 2
@@ -171,10 +172,19 @@ function turnTailOf(turn: unknown): { ttftMs?: number; tokensPerSecond?: number 
 
 /**
  * @param props - session standard kit (useSession, sessionId, useProjection),
- * the injected loadOlder action, and the bookmarks store pair (useStore +
- * actions, injected by the framework from the declared store seat).
+ * the injected loadOlder/forkAt actions, the bookmarks store pair (useStore +
+ * actions, injected by the framework from the declared store seat), and the
+ * framework-synthesized `t` locale interpreter (registered via the entry's
+ * `locale: 'dsh-milestone'`; defaults to a key-pass fallback for renders
+ * outside the slot machinery).
  */
-export function MilestoneRail({ useSession, loadOlder, useStore, actions }: MilestoneRailProps) {
+export function MilestoneRail({
+  useSession,
+  loadOlder,
+  useStore,
+  actions,
+  t = (key) => key,
+}: MilestoneRailProps) {
   const order = useSession(s => s.chat.order)
   const nodes = useSession(s => s.chat.nodes)
   const timeline = useSession(s => s.chat.timeline)
