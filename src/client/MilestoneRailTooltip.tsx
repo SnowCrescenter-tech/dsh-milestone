@@ -125,6 +125,13 @@ export function MilestoneRailTooltip({
         {hover.ttftLabel !== null && <span>{t('ttft.label', { name: hover.ttftLabel })}</span>}
         {hover.tpsLabel !== null && <span>{hover.tpsLabel}</span>}
       </div>
+      {(hover.modelLabel !== null || hover.purposeLabel !== null || hover.tokensLabel !== null) && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 11, marginTop: 4 }}>
+          {hover.modelLabel !== null && <span data-model={hover.modelLabel}>{hover.modelLabel}</span>}
+          {hover.purposeLabel !== null && <span data-purpose={hover.purposeLabel}>{hover.purposeLabel}</span>}
+          {hover.tokensLabel !== null && <span data-tokens={hover.tokensLabel}>{hover.tokensLabel}</span>}
+        </div>
+      )}
     </div>
   )
 }

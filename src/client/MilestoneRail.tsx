@@ -38,6 +38,7 @@ import { badgeRingStyle, deriveBadge } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
 import { reasonKeyOf } from './label-logic'
+import { deriveTurnMeta } from './tooltip-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import type { MilestoneKey } from './locales.ts'
@@ -123,8 +124,31 @@ export interface HoverInfo {
   readonly reasonLabel: string | null
   readonly ttftLabel: string | null
   readonly tpsLabel: string | null
+  /** C2: the model that answered the turn, when the assistant step recorded one. */
+  readonly modelLabel: string | null
+  /** C2: the request purpose of the turn, when the assistant step recorded one. */
+  readonly purposeLabel: string | null
+  /** C2: "input / output tok", when BOTH token counts of the turn are known. */
+  readonly tokensLabel: string | null
   /** Viewport-y center of the hovered dot, for tooltip placement. */
   readonly top: number
+}
+
+/**
+ * C2: structural view of one ui-trajectory request record — the fallback
+ * metadata source when no `assistant-step` node answers a turn. Only `turn`
+ * and the optional provider/usage fields are read.
+ */
+interface TrajectoryRequestLike {
+  readonly turn: number
+  readonly requestConfig?: { provider: string; model: string; purpose?: string }
+  readonly provenance?: { provider: string; model: string }
+  readonly usage?: unknown
+}
+
+/** C2: structural view of the ui-trajectory payload served from `views.get('trajectory')`. */
+interface TrajectoryViewLike {
+  readonly requests?: readonly TrajectoryRequestLike[]
 }
 
 /**
@@ -176,7 +200,15 @@ export function MilestoneRail({
 }: MilestoneRailProps) {
   const order = useSession(s => s.chat.order)
   const nodes = useSession(s => s.chat.nodes)
+  const locations = useSession(s => s.chat.locations)
   const timeline = useSession(s => s.chat.timeline)
+  // C2: the ui-trajectory request stream, the fallback source for the hover
+  // model/purpose/token metadata. The harness merges the 'trajectory' key
+  // into ConversationViewSnapshotMap (not shipped with this plugin), so the
+  // view store is decoded structurally at the boundary.
+  const trajectoryRequests = useSession(
+    (s) => (s.views as { get(key: string): TrajectoryViewLike | undefined }).get('trajectory')?.requests,
+  )
   // F3: the conversation paging window. `hasMore` is boolean (no absolute
   // count available), `loadingOlder` gates the button while a page loads.
   const hasMore = useSession(s => s.hasMore)
@@ -390,6 +422,10 @@ export function MilestoneRail({
         if (tail.tokensPerSecond !== undefined) tpsLabel = `${tail.tokensPerSecond.toFixed(1)} tok/s`
       }
     }
+    // C2: model / purpose / token usage for the turn, from its assistant-step
+    // node(s), falling back to the trajectory request stream when no node
+    // answers. All-null when the turn is absent or nothing is recorded.
+    const meta = deriveTurnMeta(nodes, locations, mark.turn, trajectoryRequests)
     return {
       mark,
       index,
@@ -399,6 +435,12 @@ export function MilestoneRail({
       reasonLabel,
       ttftLabel,
       tpsLabel,
+      modelLabel: meta.model,
+      purposeLabel: meta.purpose,
+      tokensLabel:
+        meta.inputTokens !== null && meta.outputTokens !== null
+          ? `${meta.inputTokens} / ${meta.outputTokens} tok`
+          : null,
     }
   }
 
