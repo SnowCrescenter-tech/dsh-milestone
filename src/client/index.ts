@@ -33,7 +33,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required services (cordis fiber inject). */
-export const inject = ['slots']
+export const inject = ['slots', 'sessions']
 
 /**
  * Register the overlay and rail once their slot declarations are on the
