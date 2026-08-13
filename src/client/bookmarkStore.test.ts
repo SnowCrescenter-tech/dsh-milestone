@@ -4,57 +4,17 @@
  * persistence, immer-draft actions, and scope-key suffixing are the genuine
  * bundled code, never mocked.
  *
- * The runtime ships its client half as a browser closure bundle
- * (`window.__ModuleLoader__.load({ factory })`, the harness loader's dialect)
- * that vitest has no loader for and whose CJS interop exposes no exports. So
- * this file evaluates the real bundle source directly (capturing its true
- * `module.exports`) and routes the import back to that captured engine — the
- * loader shell is the only thing simulated. Only localStorage is stubbed per
- * test (fresh Map-backed object) so persistence is observable and isolated.
+ * The runtime's client subpath is aliased (vitest.config.ts) to a test shim
+ * (`src/test/runtime-client.ts`) that evaluates the real closure bundle and
+ * re-exports its engine, so `bookmarkStore.ts`'s `defineStore` import is the
+ * true engine. Only localStorage is stubbed per test (fresh Map-backed object)
+ * so persistence is observable and isolated.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-// The bundle source, imported as raw text via Vite's `?raw` query (no node
-// builtins — TypeScript 6 does not auto-include @types/node in this project).
-import bundleSrc from '@deepseek-ai/dsh-client-runtime/client?raw'
+import { createBookmarksStore } from './bookmarkStore'
 
 const PERSIST_KEY = 'dsh-milestone.bookmarks'
 const SESSION_KEY = 'dsh-milestone.bookmarks.s1'
-
-// Captured real bundle exports, shared between the eval below and the vi.mock
-// factory (which runs later, at first import of the runtime module).
-const captured = () => (globalThis as unknown as { __RUNTIME_EXPORTS__: Record<string, unknown> }).__RUNTIME_EXPORTS__
-
-// Load the closure bundle's two synchronous dependencies up front (genuine
-// installed modules), then evaluate the bundle source: its top-level
-// `window.__ModuleLoader__.load(...)` is answered by the shim below, whose
-// load() returns the factory's module.exports — the bundle's real exports.
-const [cordisNS, uiSlotsNS] = await Promise.all([
-  import('@deepseek-ai/cordis'),
-  import('@deepseek-ai/dsh-client-ui-slots'),
-])
-const requireShim = (id: string): unknown => {
-  if (id === '@deepseek-ai/cordis') return cordisNS
-  if (id === '@deepseek-ai/dsh-client-ui-slots') return uiSlotsNS
-  throw new Error(`bookmarkStore.test loader: unexpected require("${id}")`)
-}
-// Evaluate the bundle source in a plain function scope. `new Function` runs in
-// the true global realm (distinct from the ESM module realm), so the loader
-// shim must be installed on THAT realm's `window` — inside the eval body. The
-// shim's load() returns the factory's module.exports (the real exports), and
-// the bundle's single top-level `window.__ModuleLoader__.load({...})` call is
-// made an explicit `return` so this function hands the exports back.
-;(globalThis as unknown as { __RUNTIME_EXPORTS__: Record<string, unknown> }).__RUNTIME_EXPORTS__ =
-  new Function(
-    'require',
-    `window.__ModuleLoader__ = { load: (entry) => entry.factory(require) };\nreturn ` + bundleSrc,
-  )(requireShim) as Record<string, unknown>
-
-// Route the store's import of the bundle to the captured real engine (vite
-// would otherwise give an empty namespace for the closure bundle). The mock
-// factory defers to first import, by which time the capture above ran.
-vi.mock('@deepseek-ai/dsh-client-runtime/client', () => captured())
-
-const { createBookmarksStore } = await import('./bookmarkStore')
 
 /** Full Storage surface (getItem/setItem/removeItem/clear/key/length) over a Map. */
 function createStorage(backing: Map<string, string>): Storage {
