@@ -14,9 +14,18 @@
  *
  * Positioning: the rail hugs the conversation scrollport's right edge (offset a
  * little inward so it clears the native scrollbar and sits near the prose).
+ *
+ * In-rail search (F1): a magnifier toggle at the rail top opens a compact
+ * panel to the rail's left with a message-text search input; matches light up
+ * the dots (non-matches dim), Enter cycles the active match (wrapping) and
+ * jumps to it, Escape clears and closes. Matching runs over the FULL message
+ * text (`text` from rail-logic.extractText), not the truncated hover preview.
  */
 import { useLayoutEffect, useMemo, useState } from 'react'
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
+import { RailSearchUi } from './MilestoneRailSearch.tsx'
 
 export type MilestoneRailProps = PropsRuntime<'milestone.rail'>
 
@@ -38,7 +47,18 @@ interface MilestoneMark {
   readonly turn: number | undefined
   readonly seq: number
   readonly time: number
+  /** FULL plain text of the message — the search corpus (never truncated). */
+  readonly text: string
+  /** First 80 chars of the message — the hover tooltip preview. */
   readonly preview: string
+}
+
+/** In-rail search state (F1). */
+interface SearchState {
+  readonly query: string
+  /** Position within the CURRENT match list (not a mark index). */
+  readonly activePos: number
+  readonly panelOpen: boolean
 }
 
 interface RailBox {
@@ -71,24 +91,9 @@ function findRow(key: string): HTMLElement | null {
   return null
 }
 
-/** Extract a plain-text preview from a user message's ContentBlock[] payload. */
+/** Extract a plain-text hover preview (first 80 chars) from a ContentBlock[]. */
 function extractPreview(content: unknown): string {
-  if (!Array.isArray(content)) return ''
-  let text = ''
-  for (const block of content) {
-    if (block !== null && typeof block === 'object' && (block as { type?: unknown }).type === 'text') {
-      const t = (block as { text?: unknown }).text
-      if (typeof t === 'string') text += (text === '' ? '' : ' ') + t
-    }
-  }
-  return text.trim().slice(0, PREVIEW_LENGTH)
-}
-
-/** Blue gradient: newest (last) dots are deepest, oldest are lightest. */
-function dotColor(index: number, total: number): string {
-  const t = total <= 1 ? 0 : index / (total - 1)
-  const lightness = 72 - t * 27 // 72% -> 45%
-  return `hsl(218, 88%, ${lightness}%)`
+  return extractText(content).slice(0, PREVIEW_LENGTH)
 }
 
 /** Relative wall-clock label for a Unix-epoch-ms timestamp. */
@@ -153,6 +158,7 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
         turn,
         seq: data.seq ?? 0,
         time: data.time ?? 0,
+        text: extractText(data.content),
         preview: extractPreview(data.content),
       })
     }
@@ -161,6 +167,15 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
 
   const [railBox, setRailBox] = useState<RailBox | null>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
+  const [search, setSearch] = useState<SearchState>({ query: '', activePos: 0, panelOpen: false })
+
+  // Match list over the FULL message text. Empty query matches everything, so
+  // an empty search never dims dots — `hasQuery` gates the dim styling.
+  const { matches } = useMemo(() => filterMarks(marks, search.query), [marks, search.query])
+  const hasQuery = search.query.trim() !== ''
+  const activeMarkIndex = hasQuery && matches.length > 0
+    ? matches[Math.min(search.activePos, matches.length - 1)]
+    : -1
 
   // Position the rail at the conversation scrollport's right edge. Depends only
   // on mark count (not mark content) so it re-runs on length changes, not on
@@ -194,6 +209,31 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
 
   const jump = (key: string): void => {
     findRow(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const updateQuery = (query: string): void => {
+    setSearch({ query, activePos: 0, panelOpen: true })
+  }
+
+  const clearSearch = (): void => {
+    setSearch((s) => ({ ...s, query: '', activePos: 0 }))
+  }
+
+  const closeSearch = (): void => {
+    setSearch({ query: '', activePos: 0, panelOpen: false })
+  }
+
+  /** Enter: cycle to the next match (wrapping) and jump to that dot's row. */
+  const advanceMatch = (): void => {
+    if (matches.length === 0) return
+    const next = nextMatchIndex(search.activePos, matches.length, 1)
+    setSearch((s) => ({ ...s, activePos: next }))
+    jump(marks[matches[next]].key)
+  }
+
+  const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') advanceMatch()
+    if (e.key === 'Escape') closeSearch()
   }
 
   const buildHover = (mark: MilestoneMark, index: number): Omit<HoverInfo, 'top'> => {
@@ -240,12 +280,28 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
         width: DOT_HIT,
         pointerEvents: 'auto',
         zIndex: 100,
+        display: 'flex',
+        flexDirection: 'column',
       }}
       aria-label="会话里程碑"
     >
+      <RailSearchUi
+        panelTop={railBox.top}
+        panelRight={railBox.right + DOT_HIT + 8}
+        query={search.query}
+        panelOpen={search.panelOpen}
+        matches={matches.length}
+        total={marks.length}
+        onToggle={() => setSearch((s) => ({ ...s, panelOpen: !s.panelOpen }))}
+        onQueryChange={updateQuery}
+        onSearchKeyDown={onSearchKeyDown}
+        onClear={clearSearch}
+      />
+
       <div
         style={{
-          height: '100%',
+          flex: 1,
+          minHeight: 0,
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
@@ -255,43 +311,64 @@ export function MilestoneRail({ useSession }: MilestoneRailProps) {
           scrollbarWidth: 'none',
         }}
       >
-        {marks.map((mark, i) => (
-          <button
-            key={mark.key}
-            type="button"
-            style={{
-              width: DOT_HIT,
-              height: DOT_HIT,
-              flexShrink: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'transparent',
-              border: 'none',
-              padding: 0,
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect()
-              setHover({ ...buildHover(mark, i), top: rect.top + rect.height / 2 })
-            }}
-            onMouseLeave={() => setHover(null)}
-            onClick={() => jump(mark.key)}
-            aria-label={`跳转到第 ${i + 1} 条消息`}
-          >
-            <span
+        {marks.map((mark, i) => {
+          // markState precedence (current > active > match > dimmed > normal);
+          // F2 will feed isCurrent — F1 leaves it false. Hover styling wins
+          // over every search state so hovering a dimmed dot still lights it.
+          const dotState = markState({
+            key: mark.key,
+            hasQuery,
+            isMatch: matches.includes(i),
+            isActive: i === activeMarkIndex,
+            isCurrent: false,
+          })
+          const isHovered = hover?.mark.key === mark.key
+          const boxShadow = isHovered
+            ? '0 0 0 3px rgba(77, 124, 254, 0.35)'
+            : dotState === 'active'
+              ? '0 0 0 3px rgba(255, 255, 255, 0.9)'
+              : 'none'
+          return (
+            <button
+              key={mark.key}
+              type="button"
               style={{
-                width: DOT_SIZE,
-                height: DOT_SIZE,
-                borderRadius: '50%',
-                background: dotColor(i, marks.length),
-                boxShadow: hover?.mark.key === mark.key ? '0 0 0 3px rgba(77, 124, 254, 0.35)' : 'none',
-                transition: 'transform 120ms ease',
-                transform: hover?.mark.key === mark.key ? 'scale(1.35)' : 'none',
+                width: DOT_HIT,
+                height: DOT_HIT,
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: 'none',
+                padding: 0,
+                cursor: 'pointer',
               }}
-            />
-          </button>
-        ))}
+              onMouseEnter={(e) => {
+                const rect = e.currentTarget.getBoundingClientRect()
+                setHover({ ...buildHover(mark, i), top: rect.top + rect.height / 2 })
+              }}
+              onMouseLeave={() => setHover(null)}
+              onClick={() => jump(mark.key)}
+              aria-label={`跳转到第 ${i + 1} 条消息`}
+              aria-current={dotState === 'active' ? 'true' : undefined}
+              data-dimmed={dotState === 'dimmed' ? 'true' : undefined}
+            >
+              <span
+                style={{
+                  width: DOT_SIZE,
+                  height: DOT_SIZE,
+                  borderRadius: '50%',
+                  background: dotColor(i, marks.length),
+                  boxShadow,
+                  transition: 'transform 120ms ease, opacity 120ms ease',
+                  transform: `scale(${isHovered ? 1.35 : dotState === 'active' ? 1.25 : 1})`,
+                  opacity: isHovered || dotState !== 'dimmed' ? 1 : 0.22,
+                }}
+              />
+            </button>
+          )
+        })}
       </div>
 
       {hover !== null && (
