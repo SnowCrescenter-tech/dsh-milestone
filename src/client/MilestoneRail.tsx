@@ -31,7 +31,7 @@
  * `loadingOlder`), and a compact hint to the rail's left states how many
  * messages the current window covers.
  */
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { badgeRingStyle, deriveBadge } from './badge-logic'
@@ -43,6 +43,7 @@ import { deriveTurnMeta } from './tooltip-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import type { MilestoneKey } from './locales.ts'
+import { buildRenderList, buildTurnGroups } from './turn-group-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
@@ -133,6 +134,12 @@ export interface HoverInfo {
   readonly tokensLabel: string | null
   /** Viewport-y center of the hovered dot, for tooltip placement. */
   readonly top: number
+  /**
+   * C4: how many visible dots share the hovered mark's turn — the tooltip
+   * collapse action only shows when this is > 1. `null` when the mark
+   * carries no turn info (never collapsible).
+   */
+  readonly turnMarkCount: number | null
 }
 
 /**
@@ -281,6 +288,9 @@ export function MilestoneRail({
   // (buildHover is the reset — no timers).
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [forkedKey, setForkedKey] = useState<string | null>(null)
+  // C4: turns whose group is collapsed to its LAST mark (per-turn collapse).
+  // Updates are immutable — toggling builds a fresh ReadonlySet, never mutates.
+  const [collapsedTurns, setCollapsedTurns] = useState<ReadonlySet<number>>(new Set())
   // Roving tabindex (T9): the dot index that owns the single tab stop.
   const [focusIndex, setFocusIndex] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -307,6 +317,37 @@ export function MilestoneRail({
   const activeMarkIndex = hasQuery && matches.length > 0
     ? matches[Math.min(search.activePos, matches.length - 1)]
     : -1
+
+  // C4: consecutive-turn groups over the visible dots, and the render list
+  // derived from them — collapsed turns show only their LAST mark, and
+  // `separatorsAt` names the item indices where a group boundary sits.
+  const groups = useMemo(() => buildTurnGroups(displayMarks), [displayMarks])
+  const render = useMemo(() => buildRenderList(groups, collapsedTurns), [groups, collapsedTurns])
+  // C4: `separatorsAt[k]` is the items-index where group k+1 starts, so the
+  // dot at that index carries that group's turn — the separator's data-turn.
+  const separatorIndices = useMemo(() => new Set(render.separatorsAt), [render])
+  // C4: keys of dots rendered as a collapsed turn's summary (the turn's LAST
+  // mark), mapped to that group's mark count. Mirrors buildRenderList's
+  // collapse predicate: turn present, >1 marks, turn in collapsedTurns.
+  const collapsedSummaries = useMemo(() => {
+    const summaries = new Map<string, number>()
+    for (const group of groups) {
+      if (group.turn !== null && group.marks.length > 1 && collapsedTurns.has(group.turn)) {
+        summaries.set(group.marks[group.marks.length - 1].key, group.marks.length)
+      }
+    }
+    return summaries
+  }, [groups, collapsedTurns])
+  // C4: visible-dot count per turn — the tooltip collapse action only shows
+  // for turns with more than one mark (`turnMarkCount` in the hover).
+  const turnMarkCounts = useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const mark of displayMarks) {
+      if (mark.turn === undefined) continue
+      counts.set(mark.turn, (counts.get(mark.turn) ?? 0) + 1)
+    }
+    return counts
+  }, [displayMarks])
 
   // Position the rail at the conversation scrollport's right edge. Depends only
   // on mark count (not mark content) so it re-runs on length changes, not on
@@ -336,12 +377,12 @@ export function MilestoneRail({
     }
   }, [marks.length])
 
-  // Keep the roving tab stop inside the dot list when it shrinks (e.g. the
-  // bookmarks-only filter narrows the dots): an out-of-range focusIndex would
-  // leave the widget with NO tab stop at all.
+  // Keep the roving tab stop inside the dot list when it shrinks (the
+  // bookmarks-only filter or a collapsed turn narrows the dots): an
+  // out-of-range focusIndex would leave the widget with NO tab stop at all.
   useLayoutEffect(() => {
-    setFocusIndex((f) => clampIndex(f, displayMarks.length))
-  }, [displayMarks.length])
+    setFocusIndex((f) => clampIndex(f, render.items.length))
+  }, [render.items.length])
 
   if (railBox === null || marks.length < MIN_MARKS) return null
 
@@ -382,17 +423,18 @@ export function MilestoneRail({
   /** Tab lands on the list itself: hand focus to the dot owning the tab stop. */
   const onListFocus = (e: ReactFocusEvent<HTMLDivElement>): void => {
     if (e.target !== e.currentTarget) return
-    focusDotAt(clampIndex(focusIndex, displayMarks.length))
+    focusDotAt(clampIndex(focusIndex, render.items.length))
   }
 
   /**
    * Roving-tabindex keys: ArrowDown/ArrowUp move focus (wrapping), Home/End
    * jump to first/last. Enter/Space are deliberately NOT handled — the dots
    * are real buttons, so native activation fires the jump click untouched
-   * (preventDefault here would swallow it).
+   * (preventDefault here would swallow it). The rover counts RENDERED dots
+   * (collapsed turns shrink the list).
    */
   const onListKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>): void => {
-    const count = displayMarks.length
+    const count = render.items.length
     let next: number | null = null
     switch (e.key) {
       case 'ArrowDown': next = nextFocusIndex(focusIndex, count, 1); break
@@ -452,7 +494,22 @@ export function MilestoneRail({
         meta.inputTokens !== null && meta.outputTokens !== null
           ? `${meta.inputTokens} / ${meta.outputTokens} tok`
           : null,
+      turnMarkCount: mark.turn !== undefined ? turnMarkCounts.get(mark.turn) ?? 0 : null,
     }
+  }
+
+  /**
+   * C4: collapse/expand the hovered mark's turn in the rail. The set is
+   * replaced immutably (a turn toggles out when already present); collapsing
+   * keeps the turn's LAST mark visible via buildRenderList.
+   */
+  const onToggleCollapse = (turn: number): void => {
+    setCollapsedTurns((prev) => {
+      const next = new Set(prev)
+      if (next.has(turn)) next.delete(turn)
+      else next.add(turn)
+      return next
+    })
   }
 
   /**
@@ -606,20 +663,32 @@ export function MilestoneRail({
           scrollbarWidth: 'none',
         }}
       >
-        {displayMarks.map((mark, i) => {
+        {render.items.map((item, i) => {
+          // C4: this slot opens a new turn group — render a thin boundary
+          // line before the dot. `item.mark.turn` is the group's turn (the
+          // first, or collapsed-summary, mark of the group that starts here).
+          const showSeparator = separatorIndices.has(i)
+          // C4: buildTurnGroups narrows marks to {key, turn}; displayIndex is
+          // the ORIGINAL flat index (buildRenderList contract), so resolving
+          // the full mark (seq/time/text/preview) back through it is exact.
+          const mark = displayMarks[item.displayIndex]
+          // C4: the dot is a collapsed turn's summary when its key maps to a
+          // collapsed group — `summaryCount` is that group's mark count.
+          const summaryCount = collapsedSummaries.get(mark.key)
           // markState precedence (current > active > match > dimmed > normal):
           // F2 feeds isCurrent from useCurrentAnchor, so the dot for the row
           // at the viewport top is 'current'. While a query is active the
           // position ring stands down (search match/active states own the
           // dots — the active match keeps its aria-current); it returns when
           // the query clears. Hover styling wins over every search/position
-          // state so hovering a dimmed dot still lights it.
+          // state so hovering a dimmed dot still lights it. All search/current
+          // signals use the mark's ORIGINAL flat index (item.displayIndex).
           const bookmarked = isBookmarked(bookmarkedKeys, mark.key)
           const dotState = markState({
             key: mark.key,
             hasQuery,
-            isMatch: matches.includes(i),
-            isActive: i === activeMarkIndex,
+            isMatch: matches.includes(item.displayIndex),
+            isActive: item.displayIndex === activeMarkIndex,
             isCurrent: !hasQuery && mark.key === currentKey,
           })
           const isHovered = hover?.mark.key === mark.key
@@ -640,72 +709,88 @@ export function MilestoneRail({
           // dimmed-dot opacity scales it down with the dot.
           const badge = deriveBadge({
             nodeKinds: mark.turn === undefined ? NO_KINDS : kindsByTurn.get(mark.turn) ?? NO_KINDS,
-            lastMark: i === displayMarks.length - 1,
+            lastMark: item.displayIndex === displayMarks.length - 1,
             running,
             awaitingInput,
           })
           const ringStyle = badge === null ? null : badgeRingStyle(badge)
           return (
-            <button
-              key={mark.key}
-              type="button"
-              style={{
-                width: DOT_HIT,
-                height: DOT_HIT,
-                flexShrink: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                background: 'transparent',
-                border: 'none',
-                padding: 0,
-                cursor: 'pointer',
-              }}
-              onMouseEnter={(e) => {
-                const rect = e.currentTarget.getBoundingClientRect()
-                setHover({ ...buildHover(mark, i), top: rect.top + rect.height / 2 })
-              }}
-              onClick={() => jump(mark.key)}
-              data-rail-dot
-              tabIndex={focusIndex === i ? 0 : -1}
-              onFocus={() => setFocusIndex(i)}
-              aria-label={t('jump.to', { n: i + 1 })}
-              aria-current={dotState === 'active' ? 'true' : undefined}
-              data-current={dotState === 'current' ? 'true' : undefined}
-              data-dimmed={dotState === 'dimmed' ? 'true' : undefined}
-            >
-              <span
+            <Fragment key={mark.key}>
+              {showSeparator && (
+                <div
+                  data-turn-separator
+                  data-turn={mark.turn === undefined ? undefined : mark.turn}
+                  style={{
+                    width: DOT_HIT - 8,
+                    height: 1,
+                    flexShrink: 0,
+                    background: 'rgba(139, 150, 171, 0.35)',
+                    borderRadius: 1,
+                  }}
+                />
+              )}
+              <button
+                type="button"
                 style={{
-                  position: 'relative',
-                  width: DOT_SIZE,
-                  height: DOT_SIZE,
-                  borderRadius: '50%',
-                  background: dotColor(i, marks.length),
-                  boxShadow,
-                  transition: 'transform 120ms ease, opacity 120ms ease',
-                  transform: `scale(${isHovered ? 1.35 : dotState === 'active' || dotState === 'current' ? 1.25 : 1})`,
-                  opacity: isHovered || dotState !== 'dimmed' ? 1 : 0.22,
+                  width: DOT_HIT,
+                  height: DOT_HIT,
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
                 }}
-                data-bookmarked={bookmarked ? 'true' : undefined}
+                onMouseEnter={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  setHover({ ...buildHover(mark, item.displayIndex), top: rect.top + rect.height / 2 })
+                }}
+                onClick={() => jump(mark.key)}
+                data-rail-dot
+                data-collapsed-summary={summaryCount !== undefined ? 'true' : undefined}
+                data-collapsed-count={summaryCount}
+                tabIndex={focusIndex === i ? 0 : -1}
+                onFocus={() => setFocusIndex(i)}
+                aria-label={t('jump.to', { n: item.displayIndex + 1 })}
+                aria-current={dotState === 'active' ? 'true' : undefined}
+                data-current={dotState === 'current' ? 'true' : undefined}
+                data-dimmed={dotState === 'dimmed' ? 'true' : undefined}
               >
-                {ringStyle !== null && (
-                  <span
-                    data-badge={badge}
-                    style={{
-                      position: 'absolute',
-                      inset: -3,
-                      borderRadius: '50%',
-                      border: `2px solid ${ringStyle.color}`,
-                      color: ringStyle.color,
-                      pointerEvents: 'none',
-                      animation: ringStyle.pulse
-                        ? 'milestone-badge-pulse 1.4s ease-out infinite'
-                        : undefined,
-                    }}
-                  />
-                )}
-              </span>
-            </button>
+                <span
+                  style={{
+                    position: 'relative',
+                    width: DOT_SIZE,
+                    height: DOT_SIZE,
+                    borderRadius: '50%',
+                    background: dotColor(item.displayIndex, marks.length),
+                    boxShadow,
+                    transition: 'transform 120ms ease, opacity 120ms ease',
+                    transform: `scale(${isHovered ? 1.35 : dotState === 'active' || dotState === 'current' ? 1.25 : 1})`,
+                    opacity: isHovered || dotState !== 'dimmed' ? 1 : 0.22,
+                  }}
+                  data-bookmarked={bookmarked ? 'true' : undefined}
+                >
+                  {ringStyle !== null && (
+                    <span
+                      data-badge={badge}
+                      style={{
+                        position: 'absolute',
+                        inset: -3,
+                        borderRadius: '50%',
+                        border: `2px solid ${ringStyle.color}`,
+                        color: ringStyle.color,
+                        pointerEvents: 'none',
+                        animation: ringStyle.pulse
+                          ? 'milestone-badge-pulse 1.4s ease-out infinite'
+                          : undefined,
+                      }}
+                    />
+                  )}
+                </span>
+              </button>
+            </Fragment>
           )
         })}
       </div>
@@ -720,6 +805,11 @@ export function MilestoneRail({
           onFork={onFork}
           copied={copiedKey === hover.mark.key}
           forked={forkedKey === hover.mark.key}
+          // C4: the collapsed flag is read LIVE from state (not from the
+          // hover snapshot) so the tooltip's collapse/expand label and
+          // aria-pressed flip as soon as the turn toggles.
+          turnCollapsed={hover.mark.turn !== undefined && collapsedTurns.has(hover.mark.turn)}
+          onToggleCollapse={onToggleCollapse}
           // Hover stability (T10): entering the tooltip keeps hover set
           // (the dot no longer clears it on mouse-leave — the cursor must
           // cross the rail→tooltip gap); leaving the tooltip dismisses it.

@@ -38,6 +38,14 @@ export interface MilestoneRailTooltipProps {
   readonly copied: boolean
   /** Whether the fork acknowledgement is showing for the hovered mark. */
   readonly forked: boolean
+  /**
+   * C4: whether the hovered mark's turn is currently collapsed (read LIVE
+   * from the rail's collapsedTurns state, so the label / aria-pressed flip
+   * the moment the turn toggles).
+   */
+  readonly turnCollapsed: boolean
+  /** C4: collapse/expand the hovered mark's turn (turn number; only present when `turnMarkCount > 1`). */
+  readonly onToggleCollapse: (turn: number) => void
   /** Keep hover set while the cursor is over the tooltip. */
   readonly onMouseEnter: () => void
   /** Dismiss the tooltip once the cursor leaves it. */
@@ -59,12 +67,19 @@ export function MilestoneRailTooltip({
   onFork,
   copied,
   forked,
+  turnCollapsed,
+  onToggleCollapse,
   onMouseEnter,
   onMouseLeave,
   panelRight,
   t,
 }: MilestoneRailTooltipProps) {
   const relativeTime = relativeTimeParts(hover.mark.time, Date.now())
+  // C4: the collapse action only exists for turns with more than one mark.
+  // `turn` is captured before JSX so the onClick closure sees the narrowed
+  // number type.
+  const turn = hover.mark.turn
+  const showCollapse = turn !== undefined && hover.turnMarkCount !== null && hover.turnMarkCount > 1
   return (
     <div
       onMouseEnter={onMouseEnter}
@@ -176,6 +191,32 @@ export function MilestoneRailTooltip({
         >
           {t('fork.here')}
         </button>
+        {showCollapse && turn !== undefined && (
+          <button
+            type="button"
+            data-toggle-collapse
+            aria-pressed={turnCollapsed}
+            data-collapsed={turnCollapsed ? 'true' : undefined}
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleCollapse(turn)
+            }}
+            style={{
+              flexShrink: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: 'transparent',
+              border: 'none',
+              padding: '2px 6px',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              color: turnCollapsed ? '#7ee2a8' : '#8b96ab',
+            }}
+          >
+            {turnCollapsed ? t('expand.turn') : t('collapse.turn')}
+          </button>
+        )}
       </div>
       <div style={{ color: '#c7cede' }}>{hover.mark.preview !== '' ? hover.mark.preview : t('no.text')}</div>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 11, marginTop: 4 }}>
