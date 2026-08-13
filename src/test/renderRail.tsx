@@ -24,8 +24,20 @@ import { vi } from 'vitest'
 import { MilestoneRail } from '../client/MilestoneRail.tsx'
 import type { MilestoneRailProps } from '../client/MilestoneRail.tsx'
 import { createBookmarksStore } from '../client/bookmarkStore.ts'
+import { zh } from '../client/locales.ts'
 import type { ConversationSnapshotFixture } from './snapshot-fixture.ts'
 import { buildSnapshot } from './snapshot-fixture.ts'
+
+/** Locale interpreter: looks up `key` in `dict`, falling back to the key; substitutes `{name}` slots from `params`. */
+function makeT(dict: Record<string, string>) {
+  return (key: string, params?: Record<string, string | number>) => {
+    const tpl = dict[key] ?? key
+    return params ? tpl.replace(/\{(\w+)\}/g, (slot, name) => (name in params ? String(params[name]) : slot)) : tpl
+  }
+}
+
+/** The interpreter shape passed to the rail (and overridable per render). */
+export type TInterp = (key: string, params?: Record<string, string | number>) => string
 
 export interface RailUser {
   key: string
@@ -46,6 +58,8 @@ export interface RailTestProps {
   loadOlder: () => Promise<void>
   useStore: (selector: (snap: { keys: string[] }) => unknown) => unknown
   actions: { toggle: (key: string) => void; clear: () => void }
+  t: TInterp
+  forkAt: (atSeq: number) => Promise<string>
 }
 
 /** Full Storage surface (getItem/setItem/removeItem/clear/key/length) over a Map. */
@@ -78,11 +92,16 @@ function createStorage(backing: Map<string, string>): Storage {
  *   (`store`/`actions`) and its `backing` Map (persisted JSON assertions), and
  *   testing-library's render result (`container` for scoped queries).
  */
-export function renderRail(users: RailUser[], opts?: { bookmarks?: string[] }) {
+export function renderRail(
+  users: RailUser[],
+  opts?: { bookmarks?: string[]; t?: TInterp; forkAt?: (atSeq: number) => Promise<string> },
+) {
   const snapshot = buildSnapshot({ users })
   const useSession: RailTestProps['useSession'] = (selector) => selector(snapshot)
   const loadOlder = vi.fn(async () => {})
   const useProjection: RailTestProps['useProjection'] = () => undefined
+  const t: TInterp = opts?.t ?? makeT(zh as Record<string, string>)
+  const forkAt = opts?.forkAt ?? vi.fn(async () => 'child-id')
 
   const backing = new Map<string, string>()
   vi.stubGlobal('localStorage', createStorage(backing))
@@ -103,6 +122,8 @@ export function renderRail(users: RailUser[], opts?: { bookmarks?: string[] }) {
     loadOlder,
     useStore,
     actions,
+    t,
+    forkAt,
   } as unknown as MilestoneRailProps
 
   const result = render(
@@ -118,5 +139,5 @@ export function renderRail(users: RailUser[], opts?: { bookmarks?: string[] }) {
     </div>,
   )
 
-  return { ...result, snapshot, loadOlder, store, actions, backing }
+  return { ...result, snapshot, loadOlder, store, actions, backing, forkAt }
 }
