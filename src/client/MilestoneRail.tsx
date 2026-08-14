@@ -48,12 +48,15 @@ import { buildRenderList, buildTurnGroups } from './turn-group-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { MilestoneListPanel } from './MilestoneListPanel.tsx'
 import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
+import { MilestoneSessionSearch } from './MilestoneSessionSearch.tsx'
+import type { SearchSessionsFn } from './MilestoneSessionSearch.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 
 /**
  * F3 inject face: the rail entry registers an `inject` factory (index.ts)
- * binding the session-bound `loadOlder` action (see railInject.ts); the
- * framework spreads it onto the props at render time.
+ * binding the session-bound `loadOlder` action and the cross-session
+ * `searchSessions`/`openSession` actions (see railInject.ts); the framework
+ * spreads them onto the props at render time.
  *
  * T10 store seat: `index.ts` declares `store: createBookmarksStore`, so the
  * framework instantiates a per-session bookmarks store and injects the
@@ -61,7 +64,12 @@ import { useCurrentAnchor } from './useCurrentAnchor.ts'
  * `PropsStore<H>` (`H` = the store handle the factory returns).
  */
 export type MilestoneRailProps = PropsRuntime<'milestone.rail'> &
-  InjectFace<{ loadOlder: () => Promise<void>; forkAt: (atSeq: number) => Promise<string> }> &
+  InjectFace<{
+    loadOlder: () => Promise<void>
+    forkAt: (atSeq: number) => Promise<string>
+    searchSessions: SearchSessionsFn
+    openSession: (id: string) => void
+  }> &
   PropsStore<ReturnType<typeof createBookmarksStore>> &
   PropsLocale<'dsh-milestone'>
 
@@ -230,6 +238,10 @@ export function MilestoneRail({
   forkAt,
   useStore,
   actions,
+  // P3 cross-session inject face: safe no-op defaults for renders outside
+  // the slot machinery (the panel is only reachable through the toggle).
+  searchSessions = async () => ({ items: [], hasMore: false }),
+  openSession = () => {},
   t = (key) => key,
 }: MilestoneRailProps) {
   const order = useSession(s => s.chat.order)
@@ -314,6 +326,9 @@ export function MilestoneRail({
   // P3: the expandable all-prompts list panel — when open, the list toggle
   // arms and the fixed panel (MilestoneListPanel) lists every mark.
   const [listOpen, setListOpen] = useState(false)
+  // P3: the cross-session search panel — when open, the magnifier toggle arms
+  // and the fixed panel (MilestoneSessionSearch) searches ALL sessions.
+  const [crossOpen, setCrossOpen] = useState(false)
   // C3: transient copy/fork acknowledgements — the mark key whose tooltip
   // action last succeeded. Cleared when hover moves to a DIFFERENT mark
   // (buildHover is the reset — no timers).
@@ -431,16 +446,19 @@ export function MilestoneRail({
     setFocusIndex((f) => clampIndex(f, render.items.length))
   }, [render.items.length])
 
-  // P3: Escape closes the list panel no matter where focus sits — the panel
-  // is a fixed floating layer, so the window owns the dismiss keystroke.
+  // P3: Escape closes the floating panels (list + cross-session search) no
+  // matter where focus sits — they are fixed floating layers, so the window
+  // owns the dismiss keystroke.
   useEffect(() => {
-    if (!listOpen) return
+    if (!listOpen && !crossOpen) return
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setListOpen(false)
+      if (e.key !== 'Escape') return
+      setListOpen(false)
+      setCrossOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [listOpen])
+  }, [listOpen, crossOpen])
 
   // P3 deep links: a `#msg=<mark key>` URL hash restores the conversation
   // position on load (and `jump` writes it back, so refresh/share preserve
@@ -831,6 +849,47 @@ export function MilestoneRail({
         </svg>
       </button>
 
+      <button
+        type="button"
+        data-session-search-toggle
+        aria-label={crossOpen ? t('search.cross.close') : t('search.cross.open')}
+        title={crossOpen ? t('search.cross.close') : t('search.cross.open')}
+        aria-pressed={crossOpen}
+        onClick={() => setCrossOpen((v) => !v)}
+        style={{
+          width: DOT_HIT,
+          height: DOT_HIT,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: crossOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: crossOpen ? '#9db8ff' : '#8b96ab',
+        }}
+      >
+        {/* A list of rows with a magnifier overlaid — cross-session search. */}
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M3 6h9" />
+          <path d="M3 12h9" />
+          <path d="M3 18h9" />
+          <circle cx="17" cy="7" r="3.5" />
+          <path d="m19.5 9.5 2.5 2.5" />
+        </svg>
+      </button>
+
       <RailSearchUi
         panelTop={railBox.top}
         panelRight={railBox.right + DOT_HIT + 8}
@@ -853,6 +912,17 @@ export function MilestoneRail({
           // bookmarks filters never narrow it.
           marks={marks}
           onJump={jump}
+          t={t}
+        />
+      )}
+
+      {crossOpen && (
+        <MilestoneSessionSearch
+          panelTop={railBox.top}
+          panelRight={railBox.right + DOT_HIT + 8}
+          onClose={() => setCrossOpen(false)}
+          searchSessions={searchSessions}
+          openSession={openSession}
           t={t}
         />
       )}

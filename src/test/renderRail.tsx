@@ -60,6 +60,17 @@ export interface RailTestProps {
   actions: { toggle: (key: string) => void; clear: () => void }
   t: TInterp
   forkAt: (atSeq: number) => Promise<string>
+  /** P3 cross-session search action: harness `sessions.search` unwrapped to hits + hasMore. */
+  searchSessions: (query: string, signal: AbortSignal) => Promise<{ items: SessionSearchHit[]; hasMore: boolean }>
+  /** P3 cross-session open action: select the clicked session as current. */
+  openSession: (id: string) => void
+}
+
+/** One cross-session search hit the rail renders (title joined by railInject). */
+export interface SessionSearchHit {
+  sessionId: string
+  snippet: string
+  title?: string
 }
 
 /** Full Storage surface (getItem/setItem/removeItem/clear/key/length) over a Map. */
@@ -94,7 +105,13 @@ function createStorage(backing: Map<string, string>): Storage {
  */
 export function renderRail(
   users: RailUser[],
-  opts?: { bookmarks?: string[]; t?: TInterp; forkAt?: (atSeq: number) => Promise<string> },
+  opts?: {
+    bookmarks?: string[]
+    t?: TInterp
+    forkAt?: (atSeq: number) => Promise<string>
+    searchSessions?: (query: string, signal: AbortSignal) => Promise<{ items: SessionSearchHit[]; hasMore: boolean }>
+    openSession?: (id: string) => void
+  },
 ) {
   const snapshot = buildSnapshot({ users })
   const useSession: RailTestProps['useSession'] = (selector) => selector(snapshot)
@@ -102,6 +119,10 @@ export function renderRail(
   const useProjection: RailTestProps['useProjection'] = () => undefined
   const t: TInterp = opts?.t ?? makeT(zh as Record<string, string>)
   const forkAt = opts?.forkAt ?? vi.fn(async () => 'child-id')
+  // P3: cross-session search defaults to an empty ok result; openSession
+  // records calls. Tests override both through opts.
+  const searchSessions = opts?.searchSessions ?? vi.fn(async () => ({ items: [], hasMore: false }))
+  const openSession = opts?.openSession ?? vi.fn()
 
   const backing = new Map<string, string>()
   vi.stubGlobal('localStorage', createStorage(backing))
@@ -124,6 +145,8 @@ export function renderRail(
     actions,
     t,
     forkAt,
+    searchSessions,
+    openSession,
   } as unknown as MilestoneRailProps
 
   const result = render(
@@ -139,5 +162,5 @@ export function renderRail(
     </div>,
   )
 
-  return { ...result, snapshot, loadOlder, store, actions, backing, forkAt }
+  return { ...result, snapshot, loadOlder, store, actions, backing, forkAt, searchSessions, openSession }
 }

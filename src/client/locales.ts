@@ -79,6 +79,18 @@ export const zh = {
   'list.close': '收起列表',
   /** Header title of the all-prompts list panel. */
   'list.label': '全部提问',
+  /** Header title + input placeholder of the cross-session search panel. */
+  'search.cross': '跨会话搜索',
+  /** aria-label + title on the cross-session search toggle when the panel is CLOSED. */
+  'search.cross.open': '打开跨会话搜索',
+  /** aria-label + title on the cross-session search toggle when the panel is OPEN. */
+  'search.cross.close': '收起跨会话搜索',
+  /** Cross-session result row title fallback for sessions with no display title. */
+  'search.untitled': '（无标题）',
+  /** Cross-session search failure notice. */
+  'search.error': '搜索失败，请重试',
+  /** Cross-session search footer hint when the harness capped the result list. */
+  'search.more': '结果已截断，请细化关键词',
 } as const
 
 export type MilestoneKey = keyof typeof zh
@@ -118,4 +130,10 @@ export const en: Record<MilestoneKey, string> = {
   'list.open': 'Open list',
   'list.close': 'Close list',
   'list.label': 'All prompts',
+  'search.cross': 'Cross-session search',
+  'search.cross.open': 'Open cross-session search',
+  'search.cross.close': 'Close cross-session search',
+  'search.untitled': '(untitled)',
+  'search.error': 'Search failed, retry',
+  'search.more': 'Results truncated — refine your query',
 }

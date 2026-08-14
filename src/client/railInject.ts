@@ -15,6 +15,75 @@ export interface SessionsLike {
   fork(opts: { sessionId: string; atSeq?: number; increaseTitle?: boolean }): Promise<string>
 }
 
+/** One cross-session search hit: the harness's `session.search` RPC item. */
+export interface SessionSearchResultItemLike {
+  sessionId: string
+  snippet: string
+}
+
+/** The RpcResult shape the `session.search` RPC resolves (ok value / error message). */
+export type SessionSearchRpcResult = {
+  ok: true
+  value: { items: SessionSearchResultItemLike[]; hasMore: boolean }
+} | { ok: false; error: { message: string } }
+
+/**
+ * Structural sessions-service face — the `search`/`open`/`list` slice of the
+ * harness `ISessions` contract: `search` is a cancellable one-shot RPC over
+ * the host's visible message-content index, `open` selects a listed session
+ * as current (the same path the sidebar uses), and `list.getSnapshot()`
+ * synchronously reads the session-row map for display-title joining.
+ */
+export interface SessionSearchLike {
+  search(query: string, signal: AbortSignal): Promise<SessionSearchRpcResult>
+  open(id: string): void
+  list: { getSnapshot(): { byId: Record<string, { displayTitle: string }> } }
+}
+
+/**
+ * Wrap the `session.search` RPC into a safe cross-session search action.
+ *
+ * - `ok: true` unwraps the value and joins each hit's human display title
+ *   from the session list snapshot (a session outside the list keeps no
+ *   title — the caller falls back to `search.untitled`).
+ * - `ok: false` throws `new Error(error.message)` so the caller can surface
+ *   the business/transport error as the `search.error` state.
+ * - A rejected RPC propagates unchanged.
+ *
+ * The list read happens inside the returned closure (never at factory time),
+ * so the title join always reflects the current list snapshot.
+ *
+ * @param sessions - the injected sessions service (`ctx.sessions`).
+ * @returns an action that searches all sessions' message content.
+ */
+export function createSessionSearch(
+  sessions: SessionSearchLike,
+): (query: string, signal: AbortSignal) => Promise<{ items: (SessionSearchResultItemLike & { title?: string })[]; hasMore: boolean }> {
+  return async (query, signal) => {
+    const result = await sessions.search(query, signal)
+    if (!result.ok) throw new Error(result.error.message)
+    const byId = sessions.list.getSnapshot().byId
+    return {
+      items: result.value.items.map((item) => ({
+        ...item,
+        title: byId[item.sessionId]?.displayTitle,
+      })),
+      hasMore: result.value.hasMore,
+    }
+  }
+}
+
+/**
+ * Wrap a session `open` call into a safe action that selects a listed session
+ * as current — the exact selection path the sidebar uses on click.
+ *
+ * @param sessions - the injected sessions service (`ctx.sessions`).
+ * @returns an action that opens the given session.
+ */
+export function createOpenSession(sessions: SessionSearchLike): (id: string) => void {
+  return (id) => sessions.open(id)
+}
+
 /**
  * Wrap a session-bound `loadOlder` call into a safe action closure.
  *

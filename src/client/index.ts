@@ -22,7 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { MilestoneOverlay } from './MilestoneOverlay.tsx'
 import { MilestoneRail } from './MilestoneRail.tsx'
 import { createBookmarksStore } from './bookmarkStore.ts'
-import { createForkAt, createLoadOlder } from './railInject.ts'
+import { createForkAt, createLoadOlder, createOpenSession, createSessionSearch } from './railInject.ts'
 import { en, zh, type MilestoneKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -66,8 +66,9 @@ export function apply(ctx: ClientContext): void {
     // scope and injects the `useStore` selector hook + baked `actions` onto
     // the component props via PropsStore<H>). F3/F9: session-scoped inject
     // face — the rail receives binding-safe `loadOlder` + `forkAt` actions
-    // for its own session (railInject.ts). `ctx.sessions` (ISessions)
-    // satisfies the structural SessionsLike face directly. The inject
+    // for its own session, plus the cross-session `searchSessions` /
+    // `openSession` actions (railInject.ts). `ctx.sessions` (ISessions)
+    // satisfies the structural faces directly. The inject
     // factory keeps its single-parameter shape: the framework appends the
     // baked store actions as a second positional arg, which a one-arg
     // factory simply ignores.
@@ -78,6 +79,8 @@ export function apply(ctx: ClientContext): void {
       inject: (sessionId) => ({
         loadOlder: createLoadOlder(ctx.sessions, sessionId),
         forkAt: createForkAt(ctx.sessions, sessionId),
+        searchSessions: createSessionSearch(ctx.sessions),
+        openSession: createOpenSession(ctx.sessions),
       }),
     },
     MilestoneRail,
