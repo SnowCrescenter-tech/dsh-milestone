@@ -15,7 +15,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 
 /** Dot diameter (px) — matches the rail's DOT_HIT so the toggle aligns. */
-const DOT_HIT = 22
+const DOT_HIT = 28
 
 export interface RailSearchUiProps {
   /** Panel anchor: the rail's viewport top (px). */
@@ -74,8 +74,8 @@ export function RailSearchUi({
         }}
       >
         <svg
-          width="13"
-          height="13"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -94,7 +94,8 @@ export function RailSearchUi({
             position: 'fixed',
             top: panelTop,
             right: panelRight,
-            width: 220,
+            // Clamp so the panel never overflows a narrow viewport.
+            width: 'min(220px, calc(100vw - 48px))',
             padding: '10px 12px',
             background: 'rgba(20, 24, 32, 0.97)',
             color: '#e6e8ee',
@@ -115,8 +116,9 @@ export function RailSearchUi({
               style={{
                 flex: 1,
                 minWidth: 0,
-                padding: '5px 8px',
-                fontSize: 12,
+                padding: '6px 10px',
+                fontSize: 14,
+                lineHeight: 1.4,
                 color: '#e6e8ee',
                 background: 'rgba(255, 255, 255, 0.08)',
                 border: '1px solid rgba(255, 255, 255, 0.16)',
@@ -144,8 +146,8 @@ export function RailSearchUi({
               }}
             >
               <svg
-                width="10"
-                height="10"
+                width="12"
+                height="12"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -158,7 +160,7 @@ export function RailSearchUi({
               </svg>
             </button>
           </div>
-          <div data-match-count style={{ marginTop: 6, fontSize: 11, color: '#8b96ab' }}>
+          <div data-match-count style={{ marginTop: 6, fontSize: 13, color: '#8b96ab' }}>
             {matches}/{total}
           </div>
         </div>

@@ -89,14 +89,16 @@ export function MilestoneRailTooltip({
         right: panelRight,
         top: hover.top,
         transform: 'translateY(-50%)',
-        maxWidth: 300,
+        // Clamp so the tooltip never overflows a narrow viewport.
+        maxWidth: 'min(300px, calc(100vw - 120px))',
         minWidth: 180,
         padding: '8px 12px',
         background: 'rgba(20, 24, 32, 0.96)',
         color: '#e6e8ee',
         borderRadius: 8,
-        fontSize: 12,
-        lineHeight: 1.6,
+        // Preview body: harness small-font token (14px), 1.5 line height.
+        fontSize: 'var(--dsw-font-s-14, 14px)',
+        lineHeight: 1.5,
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
         boxShadow: '0 6px 20px rgba(0, 0, 0, 0.4)',
@@ -104,7 +106,7 @@ export function MilestoneRailTooltip({
         pointerEvents: 'auto',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, color: '#9aa4b8', fontSize: 11, marginBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, color: '#9aa4b8', fontSize: 13, lineHeight: 1.4, marginBottom: 4 }}>
         <span>{t('pos.of', { n: hover.index + 1, m: hover.total })}</span>
         {hover.turnLabel !== null && <span>{hover.turnLabel}</span>}
         <button
@@ -133,8 +135,8 @@ export function MilestoneRailTooltip({
           }}
         >
           <svg
-            width="13"
-            height="13"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill={bookmarked ? 'currentColor' : 'none'}
             stroke="currentColor"
@@ -160,7 +162,7 @@ export function MilestoneRailTooltip({
             justifyContent: 'center',
             background: 'transparent',
             border: 'none',
-            padding: '2px 6px',
+            padding: '3px 8px',
             cursor: 'pointer',
             whiteSpace: 'nowrap',
             color: copied ? '#7ee2a8' : '#8b96ab',
@@ -183,7 +185,7 @@ export function MilestoneRailTooltip({
             justifyContent: 'center',
             background: 'transparent',
             border: 'none',
-            padding: '2px 6px',
+            padding: '3px 8px',
             cursor: 'pointer',
             whiteSpace: 'nowrap',
             color: forked ? '#7ee2a8' : '#8b96ab',
@@ -208,7 +210,7 @@ export function MilestoneRailTooltip({
               justifyContent: 'center',
               background: 'transparent',
               border: 'none',
-              padding: '2px 6px',
+              padding: '3px 8px',
               cursor: 'pointer',
               whiteSpace: 'nowrap',
               color: turnCollapsed ? '#7ee2a8' : '#8b96ab',
@@ -219,7 +221,7 @@ export function MilestoneRailTooltip({
         )}
       </div>
       <div style={{ color: '#c7cede' }}>{hover.mark.preview !== '' ? hover.mark.preview : t('no.text')}</div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 11, marginTop: 4 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 13, lineHeight: 1.4, marginTop: 4 }}>
         <span>{t(relativeTime.key, { n: relativeTime.n })}</span>
         {hover.durationLabel !== null && <span>{t('duration.label', { name: hover.durationLabel })}</span>}
         {hover.reasonLabel !== null && <span>{hover.reasonLabel}</span>}
@@ -227,7 +229,7 @@ export function MilestoneRailTooltip({
         {hover.tpsLabel !== null && <span>{hover.tpsLabel}</span>}
       </div>
       {(hover.modelLabel !== null || hover.purposeLabel !== null || hover.tokensLabel !== null) && (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 11, marginTop: 4 }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, color: '#8b96ab', fontSize: 13, lineHeight: 1.4, marginTop: 4 }}>
           {hover.modelLabel !== null && <span data-model={hover.modelLabel}>{hover.modelLabel}</span>}
           {hover.purposeLabel !== null && <span data-purpose={hover.purposeLabel}>{hover.purposeLabel}</span>}
           {hover.tokensLabel !== null && <span data-tokens={hover.tokensLabel}>{hover.tokensLabel}</span>}

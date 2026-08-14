@@ -82,11 +82,11 @@ const BADGE_PULSE_CSS = `@keyframes milestone-badge-pulse {
   100% { box-shadow: 0 0 0 0 transparent; opacity: 0.85 }
 }`
 /** Visual dot diameter (px). */
-const DOT_SIZE = 12
+const DOT_SIZE = 14
 /** Hit area per dot (px) — larger than the dot for comfortable clicking. */
-const DOT_HIT = 22
+const DOT_HIT = 28
 /** Vertical gap between dot hit areas (px) — fixed pitch, never scaled. */
-const DOT_GAP = 12
+const DOT_GAP = 14
 /** Inward offset from the scrollport right edge so the rail clears the scrollbar. */
 const RAIL_INSET = 14
 
@@ -561,6 +561,10 @@ export function MilestoneRail({
         zIndex: 100,
         display: 'flex',
         flexDirection: 'column',
+        // Breathing room between the rail-top control buttons and a little
+        // inset from the scrollport edge so the top button isn't flush.
+        gap: 6,
+        paddingTop: 6,
       }}
       aria-label={t('rail.label')}
     >
@@ -586,7 +590,7 @@ export function MilestoneRail({
             padding: 0,
             cursor: loadingOlder ? 'default' : 'pointer',
             color: loadingOlder ? '#5a6375' : '#8b96ab',
-            fontSize: 11,
+            fontSize: 13,
             lineHeight: 1,
             letterSpacing: 1,
           }}
@@ -617,8 +621,8 @@ export function MilestoneRail({
         }}
       >
         <svg
-          width="13"
-          height="13"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill={bookmarksOnly ? 'currentColor' : 'none'}
           stroke="currentColor"
@@ -828,7 +832,7 @@ export function MilestoneRail({
             right: '100%',
             marginRight: 8,
             whiteSpace: 'nowrap',
-            fontSize: 10,
+            fontSize: 12,
             lineHeight: 1,
             color: 'rgba(139, 150, 171, 0.9)',
             pointerEvents: 'none',
