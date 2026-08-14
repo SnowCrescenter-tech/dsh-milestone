@@ -25,6 +25,10 @@ export const zh = {
   'search.label': '搜索消息',
   /** aria-label on the bookmarks-only filter toggle. */
   'bookmark.filter': '只看收藏',
+  /** aria-label + title on the focus-mode toggle when focus is OFF (arm it). */
+  'focus.on': '聚焦模式',
+  /** aria-label + title on the focus-mode toggle when focus is ON (disarm it). */
+  'focus.off': '退出聚焦',
   /** aria-label on the hover tooltip star toggle. */
   'bookmark.star': '收藏此消息',
   /** aria-label on the search clear button. */
@@ -81,6 +85,8 @@ export const en: Record<MilestoneKey, string> = {
   'search.placeholder': 'Search message content',
   'search.label': 'Search messages',
   'bookmark.filter': 'Bookmarks only',
+  'focus.on': 'Focus mode',
+  'focus.off': 'Exit focus',
   'bookmark.star': 'Bookmark this message',
   'search.clear': 'Clear search',
   'load.older': 'Load older messages',

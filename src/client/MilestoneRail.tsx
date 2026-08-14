@@ -81,6 +81,17 @@ const BADGE_PULSE_CSS = `@keyframes milestone-badge-pulse {
   70% { box-shadow: 0 0 0 5px transparent; opacity: 0.35 }
   100% { box-shadow: 0 0 0 0 transparent; opacity: 0.85 }
 }`
+/**
+ * P3 focus mode: dims the harness's AI thinking/scratchpad blocks so the
+ * conversation reads cleaner. The rule targets the stable, un-hashed
+ * `data-variant="think"` attribute on the thinking-block ROOT (the harness
+ * renders it as `data-variant="think"` with `data-state="running|ok"`), so an
+ * overlay plugin can dim it with plain CSS. Hovering a dimmed block (or
+ * opening it, `[data-open]`) restores full opacity. Kept in an inline
+ * <style> so the plugin stays zero-asset — same pattern as BADGE_PULSE_CSS.
+ */
+const FOCUS_CSS = `[data-variant="think"] { opacity: 0.4; transition: opacity 0.2s; }
+[data-variant="think"]:hover, [data-variant="think"] [data-open] { opacity: 1; }`
 /** Visual dot diameter (px). */
 const DOT_SIZE = 14
 /** Hit area per dot (px) — larger than the dot for comfortable clicking. */
@@ -283,6 +294,9 @@ export function MilestoneRail({
   const [search, setSearch] = useState<SearchState>({ query: '', activePos: 0, panelOpen: false })
   // T10: bookmarks-only filter — when on, only bookmarked dots render.
   const [bookmarksOnly, setBookmarksOnly] = useState(false)
+  // P3: focus mode — when on, a global rule dims the harness's thinking
+  // blocks (`[data-variant="think"]`); the eye toggle arms/disarms it.
+  const [focusActive, setFocusActive] = useState(false)
   // C3: transient copy/fork acknowledgements — the mark key whose tooltip
   // action last succeeded. Cleared when hover moves to a DIFFERENT mark
   // (buildHover is the reset — no timers).
@@ -567,8 +581,10 @@ export function MilestoneRail({
         paddingTop: 6,
       }}
       aria-label={t('rail.label')}
+      data-focus-active={focusActive ? 'true' : undefined}
     >
       <style>{BADGE_PULSE_CSS}</style>
+      {focusActive && <style>{FOCUS_CSS}</style>}
       {showLoadOlder && (
         <button
           type="button"
@@ -631,6 +647,43 @@ export function MilestoneRail({
           aria-hidden="true"
         >
           <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+        </svg>
+      </button>
+
+      <button
+        type="button"
+        data-focus-toggle
+        aria-label={focusActive ? t('focus.off') : t('focus.on')}
+        title={focusActive ? t('focus.off') : t('focus.on')}
+        aria-pressed={focusActive}
+        onClick={() => setFocusActive((v) => !v)}
+        style={{
+          width: DOT_HIT,
+          height: DOT_HIT,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: focusActive ? 'rgba(126, 226, 168, 0.14)' : 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: focusActive ? '#7ee2a8' : '#8b96ab',
+        }}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+          <circle cx="12" cy="12" r="3" />
         </svg>
       </button>
 
