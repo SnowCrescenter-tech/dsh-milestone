@@ -31,7 +31,7 @@
  * `loadingOlder`), and a compact hint to the rail's left states how many
  * messages the current window covers.
  */
-import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { badgeRingStyle, deriveBadge } from './badge-logic'
@@ -45,6 +45,7 @@ import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from '.
 import type { MilestoneKey } from './locales.ts'
 import { buildRenderList, buildTurnGroups } from './turn-group-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
+import { MilestoneListPanel } from './MilestoneListPanel.tsx'
 import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 
@@ -297,6 +298,9 @@ export function MilestoneRail({
   // P3: focus mode — when on, a global rule dims the harness's thinking
   // blocks (`[data-variant="think"]`); the eye toggle arms/disarms it.
   const [focusActive, setFocusActive] = useState(false)
+  // P3: the expandable all-prompts list panel — when open, the list toggle
+  // arms and the fixed panel (MilestoneListPanel) lists every mark.
+  const [listOpen, setListOpen] = useState(false)
   // C3: transient copy/fork acknowledgements — the mark key whose tooltip
   // action last succeeded. Cleared when hover moves to a DIFFERENT mark
   // (buildHover is the reset — no timers).
@@ -397,6 +401,17 @@ export function MilestoneRail({
   useLayoutEffect(() => {
     setFocusIndex((f) => clampIndex(f, render.items.length))
   }, [render.items.length])
+
+  // P3: Escape closes the list panel no matter where focus sits — the panel
+  // is a fixed floating layer, so the window owns the dismiss keystroke.
+  useEffect(() => {
+    if (!listOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setListOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [listOpen])
 
   if (railBox === null || marks.length < MIN_MARKS) return null
 
@@ -687,6 +702,43 @@ export function MilestoneRail({
         </svg>
       </button>
 
+      <button
+        type="button"
+        data-list-toggle
+        aria-label={listOpen ? t('list.close') : t('list.open')}
+        title={listOpen ? t('list.close') : t('list.open')}
+        aria-pressed={listOpen}
+        onClick={() => setListOpen((v) => !v)}
+        style={{
+          width: DOT_HIT,
+          height: DOT_HIT,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: listOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          color: listOpen ? '#9db8ff' : '#8b96ab',
+        }}
+      >
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          aria-hidden="true"
+        >
+          <path d="M3 6h18" />
+          <path d="M3 12h18" />
+          <path d="M3 18h18" />
+        </svg>
+      </button>
+
       <RailSearchUi
         panelTop={railBox.top}
         panelRight={railBox.right + DOT_HIT + 8}
@@ -700,6 +752,18 @@ export function MilestoneRail({
         onClear={clearSearch}
         t={t}
       />
+
+      {listOpen && (
+        <MilestoneListPanel
+          panelTop={railBox.top}
+          panelRight={railBox.right + DOT_HIT + 8}
+          // P3: the panel enumerates EVERY user-prompt mark — the search and
+          // bookmarks filters never narrow it.
+          marks={marks}
+          onJump={jump}
+          t={t}
+        />
+      )}
 
       <div
         ref={listRef}

@@ -73,6 +73,12 @@ export const zh = {
   'collapse.turn': '折叠此轮',
   /** Expand-turn tooltip action. */
   'expand.turn': '展开此轮',
+  /** aria-label + title on the milestone-list toggle when the panel is CLOSED. */
+  'list.open': '打开列表',
+  /** aria-label + title on the milestone-list toggle when the panel is OPEN. */
+  'list.close': '收起列表',
+  /** Header title of the all-prompts list panel. */
+  'list.label': '全部提问',
 } as const
 
 export type MilestoneKey = keyof typeof zh
@@ -109,4 +115,7 @@ export const en: Record<MilestoneKey, string> = {
   'fork.here': 'Fork from here',
   'collapse.turn': 'Collapse turn',
   'expand.turn': 'Expand turn',
+  'list.open': 'Open list',
+  'list.close': 'Close list',
+  'list.label': 'All prompts',
 }
