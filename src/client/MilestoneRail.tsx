@@ -38,6 +38,7 @@ import { badgeRingStyle, deriveBadge } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
 import { copyText } from './clipboard-logic'
+import { buildMessageHash, parseDeepLinkHash } from './deep-link-logic'
 import { reasonKeyOf } from './label-logic'
 import { deriveTurnMeta } from './tooltip-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
@@ -101,6 +102,18 @@ const DOT_HIT = 28
 const DOT_GAP = 14
 /** Inward offset from the scrollport right edge so the rail clears the scrollbar. */
 const RAIL_INSET = 14
+/**
+ * P3 deep links (`#msg=<anchor-key>`): initial delay before the first
+ * deep-link attempt — the harness scrolls the conversation to the bottom on
+ * load, so the deep link must land AFTER the view mounts.
+ */
+const DEEP_LINK_INITIAL_DELAY = 100
+/** P3: interval between DOM-row polls while waiting for the target to render. */
+const DEEP_LINK_POLL_DELAY = 150
+/** P3: polls before falling back to a single `loadOlder` fetch. */
+const DEEP_LINK_MAX_POLLS = 5
+/** P3: bounded polls after `loadOlder`, then the deep link gives up silently. */
+const DEEP_LINK_MAX_RETRY_POLLS = 5
 
 /** One user message: its node key (DOM anchor), turn, and payload bits. */
 interface MilestoneMark {
@@ -317,6 +330,22 @@ export function MilestoneRail({
   // the dots so the current one carries the white ring.
   const currentKey = useCurrentAnchor(order)
 
+  /**
+   * P3: jump to the chat row with the given node key — smooth-scroll it into
+   * view and write the position back into the URL hash (`#msg=<key>`) so
+   * refresh and share preserve it. `history.replaceState` (not a
+   * `location.hash` assignment) keeps the history stack clean, and it never
+   * fires `hashchange`, so the deep-link listeners below never echo the
+   * rail's own updates. No-op when the row is not (yet) rendered — the
+   * deep-link mount retry and the load-older flow cover that case.
+   */
+  const jump = (key: string): void => {
+    const row = findRow(key)
+    if (row === null) return
+    row.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    history.replaceState(null, '', buildMessageHash(key))
+  }
+
   // T10: the visible dot list — the full marks list, or (filter on) the
   // bookmarked subset. EVERY downstream count (search N/M, hover N/M, roving
   // tab stop) operates on this list so the filtered view stays self-consistent.
@@ -413,11 +442,74 @@ export function MilestoneRail({
     return () => window.removeEventListener('keydown', onKey)
   }, [listOpen])
 
-  if (railBox === null || marks.length < MIN_MARKS) return null
+  // P3 deep links: a `#msg=<mark key>` URL hash restores the conversation
+  // position on load (and `jump` writes it back, so refresh/share preserve
+  // it). The retry cycle is bounded — poll up to DEEP_LINK_MAX_POLLS × 150ms
+  // for the DOM row, fetch one older page via `loadOlder` (the target may
+  // predate the loaded window), poll a bounded second phase, then give up
+  // silently — and cancelled on unmount, so a stale link never loops or
+  // spams loadOlder.
+  const marksRef = useRef(marks)
+  useEffect(() => {
+    marksRef.current = marks
+  })
 
-  const jump = (key: string): void => {
-    findRow(key)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-  }
+  useEffect(() => {
+    const key = parseDeepLinkHash(window.location.hash)
+    if (key === null) return
+    let cancelled = false
+    let timer: number | undefined
+    const attempt = (pollsLeft: number, canLoadOlder: boolean): void => {
+      if (cancelled) return
+      if (findRow(key) !== null) {
+        jump(key)
+        return
+      }
+      // The session settled without this mark — the link is stale for this
+      // session; give up silently. Empty marks mean the session is still
+      // loading, so those keep polling.
+      if (marksRef.current.length > 0 && !marksRef.current.some((m) => m.key === key)) return
+      if (pollsLeft > 0) {
+        timer = window.setTimeout(() => attempt(pollsLeft - 1, canLoadOlder), DEEP_LINK_POLL_DELAY)
+        return
+      }
+      if (canLoadOlder) {
+        // The row may predate the loaded window — fetch one older page, then
+        // run the bounded second phase. A failed fetch also gives up silently.
+        void loadOlder().then(
+          () => {
+            timer = window.setTimeout(() => attempt(DEEP_LINK_MAX_RETRY_POLLS, false), DEEP_LINK_POLL_DELAY)
+          },
+          () => {},
+        )
+        return
+      }
+      // Bounded retries exhausted — give up silently (the dots / list panel
+      // still reach the mark once its page is loaded).
+    }
+    // Deferred start: the harness scrolls the conversation to the bottom on
+    // load, so the deep link must land after the view mounts.
+    timer = window.setTimeout(() => attempt(DEEP_LINK_MAX_POLLS, true), DEEP_LINK_INITIAL_DELAY)
+    return () => {
+      cancelled = true
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
+  }, [])
+
+  useEffect(() => {
+    // P3: manual URL edits (typed hash, back/forward): jump when the target
+    // is a known mark. `jump` writes via replaceState, which never fires
+    // hashchange, so this listener never echoes the rail's own updates.
+    const onHashChange = (): void => {
+      const key = parseDeepLinkHash(window.location.hash)
+      if (key === null) return
+      if (marksRef.current.some((m) => m.key === key)) jump(key)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  if (railBox === null || marks.length < MIN_MARKS) return null
 
   const updateQuery = (query: string): void => {
     setSearch({ query, activePos: 0, panelOpen: true })
