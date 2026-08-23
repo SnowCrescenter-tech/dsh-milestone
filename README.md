@@ -17,6 +17,8 @@
 
 </div>
 
+> **English:** A Git-style milestone timeline for the DeepSeek Harness web UI — one dot per user message, hover for content and metadata (time, turn, duration, TTFT, tokens), click to jump anywhere. Full-session list, in-session & cross-session search, `#msg=` deep-link bookmarks, keyboard navigation. Install: `dsh plugin --profile demo add dsh-milestone`.
+
 ---
 
 ## 为什么需要它？
