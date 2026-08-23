@@ -57,9 +57,11 @@ import { en, translateDict, zh, type MilestoneKey } from './locales.ts'
 import { buildRenderList, buildTurnGroups } from './turn-group-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { MilestoneListPanel } from './MilestoneListPanel.tsx'
+import { MilestoneOnboarding } from './MilestoneOnboarding.tsx'
 import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { MilestoneSessionSearch } from './MilestoneSessionSearch.tsx'
 import type { SearchSessionsFn } from './MilestoneSessionSearch.tsx'
+import { readOnboardedFlag } from './onboarding-store'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
 import { DEFAULT_PREFS, loadPrefs, savePrefs, togglePin } from './toolbar-prefs.ts'
@@ -197,21 +199,23 @@ export function buildFocusCss(focus: FocusPrefs): string {
   return rules.join('\n')
 }
 /**
- * Settings modal shared palette + geometry — one source for the inline
- * styles AND the static MODAL_CSS block below so they cannot drift. Dark
- * panel on a dark host, three text tiers (primary / section title / hint +
- * muted), one border tone, a 12px panel / 8px control radius scale and a
- * 4-unit spacing scale (4 / 8 / 12 / 16 / 20).
+ * Settings modal shared palette + geometry — ONE source in modal-tokens.ts,
+ * also consumed by the 0.6.4 onboarding tutorial modal so the two dialogs
+ * cannot drift. Dark panel on a dark host, three text tiers (primary /
+ * section title / hint + muted), one border tone, a 12px panel / 8px control
+ * radius scale and a 4-unit spacing scale (4 / 8 / 12 / 16 / 20).
  */
-const MODAL_BG = 'rgba(20, 24, 32, 0.98)'
-const MODAL_FG = '#e6e8ee'
-const MODAL_TITLE = '#c7cede'
-const MODAL_TEXT = '#b9c2d4'
-const MODAL_HINT = '#8b96ab'
-const MODAL_BORDER = 'rgba(255, 255, 255, 0.14)'
-const MODAL_TIP_BG = '#222834'
-const MODAL_RADIUS_PANEL = 12
-const MODAL_RADIUS_CONTROL = 8
+import {
+  MODAL_BG,
+  MODAL_FG,
+  MODAL_TITLE,
+  MODAL_TEXT,
+  MODAL_HINT,
+  MODAL_BORDER,
+  MODAL_TIP_BG,
+  MODAL_RADIUS_PANEL,
+  MODAL_RADIUS_CONTROL,
+} from './modal-tokens'
 /** Near-row description tip: how far its right edge sits from the row's right
  * edge — clears the 32px switch + its 10px padding. */
 const MODAL_TIP_RIGHT = 54
@@ -244,12 +248,13 @@ const MODAL_CSS = `
 [data-personal-toggle]:hover, [data-focus-toggle-settings]:hover { background: rgba(255, 255, 255, 0.05); }
 [data-focus-option]:hover { background: rgba(255, 255, 255, 0.04); }
 [data-toolbar-settings-close]:hover { background: rgba(255, 255, 255, 0.08); }
-[data-toolbar-settings-reset] { background: rgba(255, 255, 255, 0.06); }
-[data-toolbar-settings-reset]:hover { background: rgba(255, 255, 255, 0.1); }
+[data-toolbar-settings-reset], [data-onboarding-reopen] { background: rgba(255, 255, 255, 0.06); }
+[data-toolbar-settings-reset]:hover, [data-onboarding-reopen]:hover { background: rgba(255, 255, 255, 0.1); }
 /* ONE accent ring for keyboard focus on every modal control. */
 [data-toolbar-pin-toggle]:focus-visible, [data-personal-toggle]:focus-visible,
 [data-focus-toggle-settings]:focus-visible,
-[data-toolbar-settings-close]:focus-visible, [data-toolbar-settings-reset]:focus-visible {
+[data-toolbar-settings-close]:focus-visible, [data-toolbar-settings-reset]:focus-visible,
+[data-onboarding-reopen]:focus-visible {
   box-shadow: 0 0 0 2px var(--ms-accent-soft);
 }
 /* Near-row description tip: a rotated square peeks out of the LEFT edge so
@@ -325,6 +330,9 @@ const DEEP_LINK_MAX_RETRY_POLLS = 5
 /** B4 update-check: mount-time silent check delay (ms) — give the harness
  * time to settle before hitting the registry. */
 const UPDATE_CHECK_MOUNT_DELAY = 1500
+/** 0.6.4 first-run tutorial: mount-time show delay (ms) — let the rail settle
+ * before the onboarding modal pops. */
+const ONBOARDING_MOUNT_DELAY = 800
 
 /** One user message: its node key (DOM anchor), turn, and payload bits. */
 interface MilestoneMark {
@@ -763,6 +771,9 @@ export function MilestoneRail({
   const [expandHovered, setExpandHovered] = useState(false)
   const [settingsHovered, setSettingsHovered] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // 0.6.4 first-run tutorial: open only when the mount timer fires and no
+  // onboarded flag is persisted (or when the user replays it from settings).
+  const [onboardingOpen, setOnboardingOpen] = useState(false)
   /** The feature whose near-row description tip is currently visible
    * (`null` = none — tips only appear on hover/focus of their own row). */
   const [descFeature, setDescFeature] = useState<ToolbarPinId | null>(null)
@@ -856,6 +867,20 @@ export function MilestoneRail({
     // runUpdateCheck closes over only module constants + stable state
     // setters, so the first-render instance is safe to capture once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // 0.6.4 first-run tutorial: ~800ms after the rail mounts, if the user has
+  // never completed/skipped it, open the onboarding modal. The flag is read
+  // at FIRE time (not mount time) so a replay-from-settings that completes
+  // before the delay never double-pops; cancelled on unmount so a stale
+  // timer never fires into a dead session. The modal itself only RENDERS
+  // inside the rail's returned tree, so sessions under the rail's minimum
+  // mark count (see the early return) simply never show it.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (!readOnboardedFlag()) setOnboardingOpen(true)
+    }, ONBOARDING_MOUNT_DELAY)
+    return () => window.clearTimeout(timer)
   }, [])
 
   // B4: outside-pointerdown dismisses the update popover (shared
@@ -1060,6 +1085,14 @@ export function MilestoneRail({
   const closeSettings = (): void => {
     setSettingsOpen(false)
     settingsBtnRef.current?.focus()
+  }
+
+  /** 0.6.4: settings → 重新查看教程 — close settings and replay the tutorial
+   * immediately (the flag may or may not be set; skipping/completing it
+   * re-persists the flag anyway). */
+  const reopenOnboarding = (): void => {
+    setSettingsOpen(false)
+    setOnboardingOpen(true)
   }
 
   /** B1: a feature renders while the toolbar is EXPANDED or while it is pinned. */
@@ -2232,26 +2265,49 @@ export function MilestoneRail({
               </div>
             </div>
 
-            {/* 恢复默认 — resets pins AND personalization together. */}
-            <button
-              type="button"
-              data-toolbar-settings-reset
-              onClick={onResetAll}
-              style={{
-                display: 'block',
-                margin: '16px auto 2px',
-                padding: '7px 16px',
-                border: `1px solid ${MODAL_BORDER}`,
-                borderRadius: MODAL_RADIUS_CONTROL,
-                cursor: 'pointer',
-                color: MODAL_TEXT,
-                fontSize: 12.5,
-              }}
+            {/* 恢复默认 + 重新查看教程 — reset pins AND personalization, or
+                replay the first-run tutorial (closes settings first). */}
+            <div
+              data-toolbar-settings-actions
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, margin: '16px auto 2px' }}
             >
-              {t('settings.reset')}
-            </button>
+              <button
+                type="button"
+                data-toolbar-settings-reset
+                onClick={onResetAll}
+                style={{
+                  padding: '7px 16px',
+                  border: `1px solid ${MODAL_BORDER}`,
+                  borderRadius: MODAL_RADIUS_CONTROL,
+                  cursor: 'pointer',
+                  color: MODAL_TEXT,
+                  fontSize: 12.5,
+                }}
+              >
+                {t('settings.reset')}
+              </button>
+              <button
+                type="button"
+                data-onboarding-reopen
+                onClick={reopenOnboarding}
+                style={{
+                  padding: '7px 16px',
+                  border: `1px solid ${MODAL_BORDER}`,
+                  borderRadius: MODAL_RADIUS_CONTROL,
+                  cursor: 'pointer',
+                  color: MODAL_TEXT,
+                  fontSize: 12.5,
+                }}
+              >
+                {t('onboarding.reopen')}
+              </button>
+            </div>
           </div>
         </div>
+      )}
+
+      {onboardingOpen && (
+        <MilestoneOnboarding t={t} accent={accent} onClose={() => setOnboardingOpen(false)} />
       )}
 
       {updateOpen && (
