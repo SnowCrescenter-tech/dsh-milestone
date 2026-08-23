@@ -250,6 +250,14 @@ const MODAL_CSS = `
 [data-toolbar-settings-close]:hover { background: rgba(255, 255, 255, 0.08); }
 [data-toolbar-settings-reset], [data-onboarding-reopen] { background: rgba(255, 255, 255, 0.06); }
 [data-toolbar-settings-reset]:hover, [data-onboarding-reopen]:hover { background: rgba(255, 255, 255, 0.1); }
+/* BASE state reset: every modal surface must sit transparent on the dark
+   panel — without it the UA default button face (light gray) floods through
+   and rows become unreadable light-on-light. Hover washes above take over
+   on interaction. */
+[data-toolbar-pin-toggle], [data-personal-toggle], [data-focus-toggle-settings],
+[data-toolbar-settings-close], [data-focus-option] {
+  background: transparent;
+}
 /* ONE accent ring for keyboard focus on every modal control. */
 [data-toolbar-pin-toggle]:focus-visible, [data-personal-toggle]:focus-visible,
 [data-focus-toggle-settings]:focus-visible,
