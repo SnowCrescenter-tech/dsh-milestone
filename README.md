@@ -130,7 +130,17 @@ shell.overlay (root scope)
 ## 更新日志
 
 <details>
-<summary>v0.6.5 / v0.6.4 / v0.6.3（点击展开）</summary>
+<summary>v0.6.6 / v0.6.5 / v0.6.4（点击展开）</summary>
+
+**v0.6.6** · 全部提问列表自动加载整个会话 · 折叠圆点 ×N 徽标 · 轮次连续显示 · 397 项测试
+
+- **全部提问列表一次看全**：打开时自动加载整个会话的历史，不再受初始加载窗口限制，点击任意一条直达。
+- **折叠轮次不藏消息**：汇总圆点带可见 ×N 计数徽标，悬停气泡显示覆盖的条数区间（第 a–b / m 条）。
+- **轮次编号连续化**：显示轮号按圆点顺序重编号（1、2、3…），不再跳空或重复；分组与折叠逻辑不变。
+- **列表点击外部自动关闭**：与搜索、跨会话搜索浮层同一套外部点击关闭契约。
+- README 重写为产品宣传结构：演示图第一屏，功能介绍分组清晰。
+
+> [GitHub Release v0.6.6](https://github.com/SnowCrescenter-tech/dsh-milestone/releases/tag/v0.6.6)
 
 **v0.6.5** · 新手教程改为锚定真实组件的教练气泡引导，设置模态对比度修复 · 近 400 项测试
 
@@ -139,10 +149,6 @@ shell.overlay (root scope)
 **v0.6.4** · 首次使用引导：4 步双语教学 + 内置演示，印象即写、关页不重弹
 
 > [GitHub Release v0.6.4](https://github.com/SnowCrescenter-tech/dsh-milestone/releases/tag/v0.6.4)
-
-**v0.6.3** · 聚焦高级设置（淡化 / 折叠、强度可调）+ 设置模态重设计
-
-> [GitHub Release v0.6.3](https://github.com/SnowCrescenter-tech/dsh-milestone/releases/tag/v0.6.3)
 
 更早版本见 [GitHub Releases](https://github.com/SnowCrescenter-tech/dsh-milestone/releases)。
 
