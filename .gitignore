@@ -13,6 +13,10 @@ dist/
 # local node runtime (dev tool, not part of the plugin)
 node-v24.19.0-win-x64/
 
+# local QA harness home (isolated DSH_HOME for surface verification)
+.dsh-qa/
+.pnpm-store/
+
 # system
 .DS_Store
 Thumbs.db
