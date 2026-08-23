@@ -10,7 +10,7 @@
 - [x] 徽章由实线圆环改为柔边光晕
 - [x] 个性化模块：强调色（预设+自定义）/ 图标与圆点大小 / 距侧边距离 / 位置左或右（浮层自动换侧）
 - [x] README 重构（分组总览表 + 折叠已知限制/更新日志）
-- [x] npm tarball 纳入 assets/*.svg（npm 页 README 图片修复）
+- [x] npm tarball 纳入 assets/*.svg（npm 页 README 图片修复）：npm 渲染器不重写相对路径，已改 absolute raw URLs（0.6.3 发布后 npm 页可见）
 - [x] **设置内语言切换（zh/en）**：设置模态加「语言 Language」区块，选项：跟随系统（harness 界面语言）/ 中文 / English，持久化到偏好；强制时以本地 zh/en 词典渲染（现有 locales.ts 双语文档已齐全，只差切换与读取路径）。★ 此项在 v0.6.2 集成时由主线程落地（避免与模态改造并发冲突）
 - [x] 版本门禁 + 按 RELEASING.md 发布（npm latest=0.6.2，GitHub Release v0.6.2，UTF-8 正文验证无乱码）
 
