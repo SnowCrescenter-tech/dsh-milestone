@@ -1,26 +1,30 @@
 /**
  * Unit tests for toolbar-prefs: the sanitize/persist layer behind the
- * collapsible toolbar's "pinned outside the collapse" preferences.
+ * collapsible toolbar's pinned features AND the settings personalization
+ * (accent / icon size / edge distance / side).
  *
  * Contract under test:
- *   - `parsePrefs` degrades to `[]` for null / invalid JSON / wrong shapes
- *     and sanitizes real blobs (whitelist ids only, duplicates dropped,
- *     unknown ids discarded, canonical order preserved)
+ *   - `parsePrefs` degrades to the DEFAULT prefs for null / invalid JSON /
+ *     wrong shapes and sanitizes real blobs field-by-field (whitelist pins,
+ *     valid hex accent, stepped+clamped sliders, side enum)
+ *   - backward compatibility: an old `{ pinned }`-only blob parses with the
+ *     new fields at their defaults
  *   - `togglePin` flips membership purely and never admits an unknown id
- *   - `savePrefs`/`loadPrefs` round-trip through localStorage (jsdom's real
- *     storage — the rail ships in a browser, so no stub needed here)
+ *   - `savePrefs`/`loadPrefs` round-trip the FULL blob through localStorage
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   TOOLBAR_PIN_IDS,
   TOOLBAR_PREFS_KEY,
+  DEFAULT_PREFS,
   isToolbarPinId,
   loadPrefs,
   parsePrefs,
   savePrefs,
   togglePin,
+  clampStep,
 } from './toolbar-prefs.ts'
-import type { ToolbarPinId } from './toolbar-prefs.ts'
+import type { ToolbarPinId, ToolbarPrefs } from './toolbar-prefs.ts'
 
 const KEY = TOOLBAR_PREFS_KEY
 
@@ -32,43 +36,58 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-describe('toolbar-prefs parsePrefs', () => {
-  it('null (nothing stored) and empty storage yield the empty default', () => {
-    expect(parsePrefs(null)).toEqual([])
-    expect(parsePrefs(undefined as unknown as string)).toEqual([])
+/** Full prefs blob helper: spot the DEFAULT values where omitted. */
+const blob = (over: Partial<ToolbarPrefs> = {}): string => JSON.stringify({ ...DEFAULT_PREFS, ...over })
+
+describe('toolbar-prefs parsePrefs — defaults', () => {
+  it('null (nothing stored) yields the DEFAULT prefs', () => {
+    expect(parsePrefs(null)).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs(undefined as unknown as string)).toEqual(DEFAULT_PREFS)
   })
 
-  it('invalid JSON degrades to the empty default', () => {
-    expect(parsePrefs('not json at all')).toEqual([])
-    expect(parsePrefs('{"pinned": [}')).toEqual([])
+  it('invalid JSON degrades to the DEFAULT prefs', () => {
+    expect(parsePrefs('not json at all')).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs('{"pinned": [}')).toEqual(DEFAULT_PREFS)
   })
 
-  it('a non-object or a blob without a pinned array degrades to the empty default', () => {
-    expect(parsePrefs('42')).toEqual([])
-    expect(parsePrefs('"search"')).toEqual([])
-    expect(parsePrefs('{}')).toEqual([])
-    expect(parsePrefs('{"pinned": "search"}')).toEqual([])
-    expect(parsePrefs('{"keys": ["search"]}')).toEqual([])
+  it('a non-object or a blob without a pinned array degrades to the DEFAULT prefs', () => {
+    expect(parsePrefs('42')).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs('"search"')).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs('{}')).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs('{"pinned": "search"}')).toEqual(DEFAULT_PREFS)
   })
 
+  it('a fresh parse never aliases the canonical default object (mutations are safe)', () => {
+    const parsed = parsePrefs(null)
+    expect(parsed).not.toBe(DEFAULT_PREFS)
+    expect(parsed).toEqual(DEFAULT_PREFS)
+  })
+})
+
+describe('toolbar-prefs parsePrefs — pinned sanitization', () => {
   it('drops unknown ids and keeps only whitelist members', () => {
-    expect(parsePrefs(JSON.stringify({ pinned: ['search', 'updateCheck', 'bookmarks', 'nope'] }))).toEqual([
-      'search',
-      'updateCheck',
-      'bookmarks',
-    ])
+    expect(
+      parsePrefs(blob({ pinned: ['search', 'updateCheck', 'bookmarks', 'nope'] as ToolbarPinId[] })),
+    ).toEqual({ ...DEFAULT_PREFS, pinned: ['search', 'updateCheck', 'bookmarks'] })
   })
 
   it('dedupes repeated ids and preserves the first-seen (pin) order', () => {
-    expect(parsePrefs(JSON.stringify({ pinned: ['focus', 'search', 'focus', 'list'] }))).toEqual([
-      'focus',
-      'search',
-      'list',
-    ])
+    expect(parsePrefs(blob({ pinned: ['focus', 'search', 'focus', 'list'] as ToolbarPinId[] }))).toEqual({
+      ...DEFAULT_PREFS,
+      pinned: ['focus', 'search', 'list'],
+    })
   })
 
   it('ignores non-string entries', () => {
-    expect(parsePrefs(JSON.stringify({ pinned: ['bookmarks', 7, null, false] }))).toEqual(['bookmarks'])
+    const weird = JSON.stringify({ ...DEFAULT_PREFS, pinned: ['bookmarks', 7, null, false] })
+    expect(parsePrefs(weird)).toEqual({ ...DEFAULT_PREFS, pinned: ['bookmarks'] })
+  })
+
+  it('the registry includes the settings key as a pin-able feature', () => {
+    expect(parsePrefs(blob({ pinned: ['settings'] as ToolbarPinId[] }))).toEqual({
+      ...DEFAULT_PREFS,
+      pinned: ['settings'],
+    })
   })
 
   it('whitelist sanity: every exported id is a valid toolbar pin id', () => {
@@ -79,57 +98,143 @@ describe('toolbar-prefs parsePrefs', () => {
   })
 })
 
-describe('toolbar-prefs togglePin', () => {
-  it('adds an absent id and removes a present one', () => {
-    expect(togglePin([], 'bookmarks')).toEqual(['bookmarks'])
-    expect(togglePin(['bookmarks', 'focus'], 'bookmarks')).toEqual(['focus'])
+describe('toolbar-prefs parsePrefs — personalization sanitization', () => {
+  it('accepts canonical accents lowercased; rejects malformed ones with the default', () => {
+    expect(parsePrefs(blob({ accent: '#22C55E' }))).toEqual({ ...DEFAULT_PREFS, accent: '#22c55e' })
+    expect(parsePrefs(blob({ accent: 'red' }))).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs(blob({ accent: '#fff' }))).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs(blob({ accent: '#gggggg' }))).toEqual(DEFAULT_PREFS)
   })
 
-  it('is pure: never mutates the input array', () => {
-    const input: ToolbarPinId[] = ['list']
+  it('iconSize snaps to the slider step and clamps to [20, 36]', () => {
+    expect(parsePrefs(blob({ iconSize: 24 }))).toEqual({ ...DEFAULT_PREFS, iconSize: 24 })
+    expect(parsePrefs(blob({ iconSize: 21 }))).toEqual({ ...DEFAULT_PREFS, iconSize: 22 })
+    expect(parsePrefs(blob({ iconSize: 2 }))).toEqual({ ...DEFAULT_PREFS, iconSize: 20 })
+    expect(parsePrefs(blob({ iconSize: 99 }))).toEqual({ ...DEFAULT_PREFS, iconSize: 36 })
+    expect(parsePrefs(blob({ iconSize: NaN }))).toEqual(DEFAULT_PREFS)
+    expect(parsePrefs(blob({ iconSize: 'big' as unknown as number }))).toEqual(DEFAULT_PREFS)
+  })
+
+  it('inset snaps to the slider step and clamps to [0, 40]', () => {
+    expect(parsePrefs(blob({ inset: 10 }))).toEqual({ ...DEFAULT_PREFS, inset: 10 })
+    expect(parsePrefs(blob({ inset: 11 }))).toEqual({ ...DEFAULT_PREFS, inset: 12 })
+    expect(parsePrefs(blob({ inset: -5 }))).toEqual({ ...DEFAULT_PREFS, inset: 0 })
+    expect(parsePrefs(blob({ inset: 55 }))).toEqual({ ...DEFAULT_PREFS, inset: 40 })
+    expect(parsePrefs(blob({ inset: NaN }))).toEqual(DEFAULT_PREFS)
+  })
+
+  it('side accepts only left/right', () => {
+    expect(parsePrefs(blob({ side: 'left' }))).toEqual({ ...DEFAULT_PREFS, side: 'left' })
+    expect(parsePrefs(blob({ side: 'right' }))).toEqual({ ...DEFAULT_PREFS, side: 'right' })
+    expect(parsePrefs(blob({ side: 'top' as unknown as ToolbarPrefs['side'] }))).toEqual(DEFAULT_PREFS)
+  })
+
+  it('backward compatible: an OLD {pinned}-only blob keeps pins and defaults the rest', () => {
+    expect(parsePrefs(JSON.stringify({ pinned: ['search', 'focus'] }))).toEqual({
+      ...DEFAULT_PREFS,
+      pinned: ['search', 'focus'],
+    })
+  })
+})
+
+describe('toolbar-prefs clampStep', () => {
+  it('snaps finite values to the step within [min, max]; anything else falls back', () => {
+    expect(clampStep(24, 20, 36, 2, 28)).toBe(24)
+    expect(clampStep(21, 20, 36, 2, 28)).toBe(22)
+    expect(clampStep(2, 20, 36, 2, 28)).toBe(20)
+    expect(clampStep(99, 20, 36, 2, 28)).toBe(36)
+    expect(clampStep('x', 20, 36, 2, 28)).toBe(28)
+    expect(clampStep(NaN, 20, 36, 2, 28)).toBe(28)
+    expect(clampStep(undefined, 20, 36, 2, 28)).toBe(28)
+  })
+})
+
+describe('toolbar-prefs togglePin', () => {
+  it('adds an absent id and removes a present one, preserving other prefs', () => {
+    expect(togglePin(DEFAULT_PREFS, 'bookmarks')).toEqual({ ...DEFAULT_PREFS, pinned: ['bookmarks'] })
+    const withPin = { ...DEFAULT_PREFS, pinned: ['bookmarks', 'focus'] as ToolbarPinId[] }
+    expect(togglePin(withPin, 'bookmarks')).toEqual({ ...DEFAULT_PREFS, pinned: ['focus'] })
+  })
+
+  it('is pure: never mutates the input prefs', () => {
+    const input: ToolbarPrefs = { ...DEFAULT_PREFS, pinned: ['list'] }
     const output = togglePin(input, 'search')
-    expect(input).toEqual(['list'])
-    expect(output).toEqual(['list', 'search'])
+    expect(input).toEqual({ ...DEFAULT_PREFS, pinned: ['list'] })
+    expect(output).toEqual({ ...DEFAULT_PREFS, pinned: ['list', 'search'] })
+    expect(output).not.toBe(input)
   })
 
   it('ignores unknown ids and returns a copy', () => {
-    const input: ToolbarPinId[] = ['bookmarks']
-    expect(togglePin(input, 'ghost')).toEqual(['bookmarks'])
+    const input: ToolbarPrefs = { ...DEFAULT_PREFS, pinned: ['bookmarks'] }
+    expect(togglePin(input, 'ghost')).toEqual(input)
     expect(togglePin(input, 'ghost')).not.toBe(input)
   })
 
   it('dedupes when the input already contains repeats', () => {
-    expect(togglePin(['search', 'search'], 'focus')).toEqual(['search', 'focus'])
+    const dupes: ToolbarPrefs = { ...DEFAULT_PREFS, pinned: ['search', 'search'] }
+    expect(togglePin(dupes, 'focus')).toEqual({ ...DEFAULT_PREFS, pinned: ['search', 'focus'] })
   })
 })
 
 describe('toolbar-prefs localStorage round-trip', () => {
-  it('loadPrefs returns [] when nothing is stored', () => {
-    expect(loadPrefs()).toEqual([])
+  it('loadPrefs returns the DEFAULT prefs when nothing is stored', () => {
+    expect(loadPrefs()).toEqual(DEFAULT_PREFS)
   })
 
-  it('savePrefs + loadPrefs round-trip the pinned set (jsdom localStorage)', () => {
-    savePrefs(['bookmarks', 'search'])
-    expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify({ pinned: ['bookmarks', 'search'] }))
-    expect(loadPrefs()).toEqual(['bookmarks', 'search'])
+  it('savePrefs + loadPrefs round-trip the FULL blob (jsdom localStorage)', () => {
+    const prefs: ToolbarPrefs = {
+      pinned: ['bookmarks', 'search'],
+      accent: '#22c55e',
+      iconSize: 32,
+      inset: 8,
+      side: 'left',
+      locale: 'en',
+    }
+    savePrefs(prefs)
+    expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify(prefs))
+    expect(loadPrefs()).toEqual(prefs)
   })
 
   it('savePrefs writes the sanitized form (unknown/duplicate ids never persist)', () => {
-    savePrefs(['bookmarks', 'ghost', 'bookmarks'])
-    expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify({ pinned: ['bookmarks'] }))
+    const bogus = { ...DEFAULT_PREFS, pinned: ['bookmarks', 'ghost', 'bookmarks'] as ToolbarPinId[] }
+    savePrefs(bogus)
+    expect(window.localStorage.getItem(KEY)).toBe(
+      JSON.stringify({ ...DEFAULT_PREFS, pinned: ['bookmarks'] }),
+    )
   })
 
-  it('savePrefs([]) persists the empty pin set (reset)', () => {
-    savePrefs(['focus'])
-    savePrefs([])
-    expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify({ pinned: [] }))
-    expect(loadPrefs()).toEqual([])
+  it('savePrefs(DEFAULT_PREFS) persists the canonical default blob (reset)', () => {
+    savePrefs({ ...DEFAULT_PREFS, pinned: ['focus'] })
+    savePrefs(DEFAULT_PREFS)
+    expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify(DEFAULT_PREFS))
+    expect(loadPrefs()).toEqual(DEFAULT_PREFS)
   })
 
   it('loadPrefs sanitizes a hand-edited blob instead of throwing', () => {
-    window.localStorage.setItem(KEY, JSON.stringify({ pinned: ['search', 'unknown', 'search'] }))
-    expect(loadPrefs()).toEqual(['search'])
+    window.localStorage.setItem(KEY, blob({ pinned: ['search', 'unknown', 'search'] as ToolbarPinId[] }))
+    expect(loadPrefs()).toEqual({ ...DEFAULT_PREFS, pinned: ['search'] })
     window.localStorage.setItem(KEY, '{broken')
-    expect(loadPrefs()).toEqual([])
+    expect(loadPrefs()).toEqual(DEFAULT_PREFS)
+  })
+})
+
+describe('toolbar-prefs locale pref (language switch)', () => {
+  it('defaults to "system" when absent or invalid', () => {
+    expect(DEFAULT_PREFS.locale).toBe('system')
+    expect(parsePrefs(null).locale).toBe('system')
+    expect(parsePrefs(JSON.stringify({ pinned: ['search'] })).locale).toBe('system')
+    expect(parsePrefs(JSON.stringify({ locale: 'fr' })).locale).toBe('system')
+    expect(parsePrefs(JSON.stringify({ locale: 42 })).locale).toBe('system')
+  })
+
+  it('accepts zh and en', () => {
+    expect(parsePrefs(JSON.stringify({ locale: 'zh' })).locale).toBe('zh')
+    expect(parsePrefs(JSON.stringify({ locale: 'en' })).locale).toBe('en')
+  })
+
+  it('a legacy {pinned}-only blob keeps its pins and gains the default locale', () => {
+    const parsed = parsePrefs(JSON.stringify({ pinned: ['bookmarks', 'focus'] }))
+    expect(parsed.pinned).toEqual(['bookmarks', 'focus'])
+    expect(parsed.locale).toBe('system')
   })
 })

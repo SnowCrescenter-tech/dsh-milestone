@@ -5,6 +5,7 @@
  * All functions are side-effect free (no React, no DOM) so the rail component
  * can consume them directly and tests can exercise them in isolation.
  */
+import { hexToHsl } from './accent-utils'
 
 /** One text content block inside a user message's ContentBlock[] payload. */
 interface TextBlock {
@@ -121,14 +122,25 @@ export function markState(opts: MarkStateOpts): MarkState {
   return 'normal'
 }
 
+/** The default accent (the classic milestone blue) — dotColor's fallback. */
+export const DEFAULT_DOT_ACCENT = '#4d7cfd'
+
 /**
- * Blue gradient dot color, reproduced exactly from MilestoneRail: newest
- * (highest index) is deepest, oldest is lightest. 72% lightness fading to 45%.
+ * Accent-driven gradient dot color: hue/saturation come from the user's
+ * accent (settings 强调色), lightness walks 72% → 45% (newest/highest index
+ * deepest, oldest lightest — the original gradient shape). Invalid accents
+ * degrade to the default blue.
  * @param index - dot position in the rail (0 = oldest).
  * @param total - number of dots.
+ * @param accent - the accent hex (`#rrggbb`); defaults to the classic blue.
  */
-export function dotColor(index: number, total: number): string {
+export function dotColor(index: number, total: number, accent: string = DEFAULT_DOT_ACCENT): string {
+  const hsl =
+    hexToHsl(accent) ??
+    // Defensive: the default is always canonical, so this never happens for a
+    // sanitized prefs blob; keeps the function total for raw callers.
+    hexToHsl(DEFAULT_DOT_ACCENT)!
   const t = total <= 1 ? 0 : index / (total - 1)
   const lightness = 72 - t * 27 // 72% -> 45%
-  return `hsl(218, 88%, ${lightness}%)`
+  return `hsl(${Math.round(hsl.h)}, ${Math.round(hsl.s)}%, ${lightness}%)`
 }

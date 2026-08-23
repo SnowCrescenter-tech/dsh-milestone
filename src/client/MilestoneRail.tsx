@@ -1,6 +1,6 @@
 /**
  * MilestoneRail: the milestone.rail entry (session scope). Renders a fixed
- * right-side vertical scrubber as a **fixed-pitch dot list** (like a git commit
+ * side vertical scrubber as a **fixed-pitch dot list** (like a git commit
  * graph), NOT a minimap: one dot per user message, equal spacing regardless of
  * conversation length. The list itself scrolls with the wheel when it outgrows
  * the viewport; hovering a dot shows rich metadata (time, turn, duration, end
@@ -12,14 +12,16 @@
  *                                          and the ui-conversation 'turn-tail'
  *                                          location data (ttftMs/tokensPerSecond)
  *
- * Positioning: the rail hugs the conversation scrollport's right edge (offset a
- * little inward so it clears the native scrollbar and sits near the prose).
+ * Positioning: the rail hugs the conversation scrollport's chosen screen edge
+ * (settings 位置: left or right), offset a little inward so it clears the
+ * native scrollbar and sits near the prose.
  *
  * In-rail search (F1): a magnifier toggle at the rail top opens a compact
- * panel to the rail's left with a message-text search input; matches light up
- * the dots (non-matches dim), Enter cycles the active match (wrapping) and
- * jumps to it, Escape clears and closes. Matching runs over the FULL message
- * text (`text` from rail-logic.extractText), not the truncated hover preview.
+ * panel on the rail's free side with a message-text search input; matches
+ * light up the dots (non-matches dim), Enter cycles the active match
+ * (wrapping) and jumps to it, Escape clears and closes. Matching runs over the
+ * FULL message text (`text` from rail-logic.extractText), not the truncated
+ * hover preview.
  *
  * Current-position highlight (F2): the dot for the user message at/just above
  * the conversation viewport top carries a white ring (`useCurrentAnchor`
@@ -28,13 +30,21 @@
  * Load-older + window coverage (F3): when the session still has earlier pages
  * (`hasMore`) a slim `···` button sits at the rail top and triggers the
  * injected `loadOlder` action (disabled + `data-loading-older` while
- * `loadingOlder`), and a compact hint to the rail's left states how many
+ * `loadingOlder`), and a compact hint on the rail's free side states how many
  * messages the current window covers.
+ *
+ * Settings (B-design): the gear is a REGULAR toolbar feature ("settings",
+ * registry last, default unpinned) — the collapsed rail shows only the expand
+ * arrow plus the user's pinned keys, and expanding reveals the gear at the end
+ * of the queue. The gear opens a CENTERED modal dialog (function-key pins /
+ * hover descriptions, the personalization controls, and the support-us card
+ * grid); everything the modal changes persists under `dsh-milestone.toolbar`.
  */
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
-import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
-import { badgeRingStyle, deriveBadge } from './badge-logic'
+import type { CSSProperties, FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
+import type { InjectFace, PropsLocale, PropsRuntime, PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { badgePulseCss, badgeRingStyle, deriveBadge } from './badge-logic'
+import type { BadgeKind } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
 import { copyText } from './clipboard-logic'
@@ -43,7 +53,7 @@ import { reasonKeyOf } from './label-logic'
 import { deriveTurnMeta } from './tooltip-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
-import type { MilestoneKey } from './locales.ts'
+import { en, translateDict, zh, type MilestoneKey } from './locales.ts'
 import { buildRenderList, buildTurnGroups } from './turn-group-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { MilestoneListPanel } from './MilestoneListPanel.tsx'
@@ -52,8 +62,9 @@ import { MilestoneSessionSearch } from './MilestoneSessionSearch.tsx'
 import type { SearchSessionsFn } from './MilestoneSessionSearch.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
-import { loadPrefs, savePrefs, togglePin } from './toolbar-prefs.ts'
-import type { ToolbarPinId } from './toolbar-prefs.ts'
+import { DEFAULT_PREFS, loadPrefs, savePrefs, togglePin } from './toolbar-prefs.ts'
+import type { RailSide, ToolbarPinId, ToolbarPrefs } from './toolbar-prefs.ts'
+import { lighten, rgbaString } from './accent-utils'
 import { loadCachedLatest, needsUpdate, SUPPORTED_HOST_LINES } from './version-logic.ts'
 import { PLUGIN_NPM_URL, PLUGIN_REPO_URL, PLUGIN_VERSION } from './version-meta.ts'
 
@@ -85,17 +96,40 @@ const PREVIEW_LENGTH = 80
 const NO_BOOKMARKS: readonly string[] = []
 /** Stable no-kinds fallback for marks whose turn carries no badge nodes. */
 const NO_KINDS: readonly string[] = []
+/** Visual dot diameter at the default icon size (px). */
+const DOT_SIZE = 14
+/** Hit area per dot at the default icon size (px) — larger than the dot. */
+const DOT_HIT = 28
+/** Vertical gap between dot hit areas at the default icon size (px). */
+const DOT_GAP = 14
 /**
- * Self-contained pulse keyframes for the transient badges (running/awaiting):
- * an expanding currentColor ring on box-shadow plus an opacity beat, driven by
- * `animation` on the badge ring span (kept in an inline <style> so the plugin
- * stays zero-asset).
+ * Extra top margin a new turn group's FIRST dot gets (replaces the old
+ * `data-turn-separator` line): same-group pitch stays DOT_GAP, a group
+ * boundary opens another GROUP_GAP_EXTRA px (14 → 18 at default size),
+ * expressed purely as spacing — no line element.
  */
-const BADGE_PULSE_CSS = `@keyframes milestone-badge-pulse {
-  0% { box-shadow: 0 0 0 0 currentColor; opacity: 0.85 }
-  70% { box-shadow: 0 0 0 5px transparent; opacity: 0.35 }
-  100% { box-shadow: 0 0 0 0 transparent; opacity: 0.85 }
-}`
+const GROUP_GAP_EXTRA = 4
+/**
+ * Preset accent swatches for the settings 强调色 row (default blue first).
+ * The custom color input accepts any #rrggbb.
+ */
+const ACCENT_PRESETS: readonly string[] = [
+  '#4d7cfd',
+  '#22c55e',
+  '#f59e0b',
+  '#ef4444',
+  '#a855f7',
+  '#06b6d4',
+  '#ec4899',
+  '#f97316',
+]
+/** Known floating-panel widths (px) used to anchor side=left panels to the
+ * rail's free (right) side — the panel components take a viewport `right`
+ * offset, so a left rail must back-calculate it from the panel width. */
+const PANEL_WIDTH_SEARCH = 220
+const PANEL_WIDTH_STANDARD = 280
+/** Tooltip anchor width: its maxWidth cap, so a tooltip never overlaps the rail. */
+const TOOLTIP_ANCHOR_WIDTH = 300
 /**
  * P3 focus mode: dims the harness's AI thinking/scratchpad blocks so the
  * conversation reads cleaner. The rule targets the stable, un-hashed
@@ -103,18 +137,33 @@ const BADGE_PULSE_CSS = `@keyframes milestone-badge-pulse {
  * renders it as `data-variant="think"` with `data-state="running|ok"`), so an
  * overlay plugin can dim it with plain CSS. Hovering a dimmed block (or
  * opening it, `[data-open]`) restores full opacity. Kept in an inline
- * <style> so the plugin stays zero-asset — same pattern as BADGE_PULSE_CSS.
+ * <style> so the plugin stays zero-asset.
  */
 const FOCUS_CSS = `[data-variant="think"] { opacity: 0.4; transition: opacity 0.2s; }
 [data-variant="think"]:hover, [data-variant="think"] [data-open] { opacity: 1; }`
-/** Visual dot diameter (px). */
-const DOT_SIZE = 14
-/** Hit area per dot (px) — larger than the dot for comfortable clicking. */
-const DOT_HIT = 28
-/** Vertical gap between dot hit areas (px) — fixed pitch, never scaled. */
-const DOT_GAP = 14
-/** Inward offset from the scrollport right edge so the rail clears the scrollbar. */
-const RAIL_INSET = 14
+/**
+ * Static settings-modal styling that needs `:hover` (which inline styles
+ * cannot express): the support-us card grid (micro-lift + accent highlight)
+ * and the pin-row hover wash. Accent values come from the rail root's CSS
+ * variables (`--ms-accent`), so one block serves every accent. The
+ * search-toggle recolor rule makes the EXTERNAL RailSearchUi chrome follow
+ * the accent too (that file is owned by an earlier phase and cannot change);
+ * `!important` is required because the toggle's own inline styles win
+ * otherwise.
+ */
+const MODAL_CSS = `
+[data-support-card] {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #c7cede; text-decoration: none; font-size: 12.5px; line-height: 1.4;
+  transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+[data-support-card]:hover { transform: translateY(-2px); border-color: var(--ms-accent); background: rgba(255, 255, 255, 0.09); }
+[data-toolbar-pin-toggle]:hover, [data-toolbar-pin-toggle]:focus-visible { background: rgba(255, 255, 255, 0.06); }
+[data-search-toggle] { color: #8b96ab !important; }
+[data-search-toggle][aria-pressed="true"] { background: var(--ms-accent-bg) !important; color: var(--ms-accent-soft) !important; }
+`
 /**
  * P3 deep links (`#msg=<anchor-key>`): initial delay before the first
  * deep-link attempt — the harness scrolls the conversation to the bottom on
@@ -158,6 +207,11 @@ interface SearchState {
  * whole RailSearchUi chrome). Pinning is purely id-driven — a feature renders
  * while the toolbar is EXPANDED or while its id is in the persisted `pinned`
  * set — so adding a feature is a registry-only change (plus its locale keys).
+ *
+ * `settings` is a REGULAR feature since the B-design move (id added last,
+ * default unpinned): the gear only renders while the toolbar is expanded (or
+ * when pinned), satisfying "settings must stay reachable" via 展开→齿轮 while
+ * keeping the collapsed rail to just the arrow + pinned keys.
  *
  * EXTENSION POINT (integration): to add a future function key (e.g. the B4
  * update-check button), push an entry with a new `id` to `toolbarFeatures`
@@ -205,7 +259,10 @@ function hostLineLabel(line: string): string {
 interface RailBox {
   readonly top: number
   readonly height: number
+  /** Distance from the viewport RIGHT edge to the rail (side=right anchor). */
   readonly right: number
+  /** Distance from the viewport LEFT edge to the rail (side=left anchor). */
+  readonly left: number
 }
 
 /** Hovered-dot metadata fed to the hover tooltip (MilestoneRailTooltip). */
@@ -301,7 +358,7 @@ export function MilestoneRail({
   // the slot machinery (the panel is only reachable through the toggle).
   searchSessions = async () => ({ items: [], hasMore: false }),
   openSession = () => {},
-  t = (key) => key,
+  t: frameworkT = (key) => key,
 }: MilestoneRailProps) {
   const order = useSession(s => s.chat.order)
   const nodes = useSession(s => s.chat.nodes)
@@ -320,7 +377,7 @@ export function MilestoneRail({
   const loadingOlder = useSession(s => s.loadingOlder)
   // T10: the persisted bookmark key list (toggle order). The framework's
   // useStore is a uSES-bound selector hook, so this re-renders on every
-  // store mutation. Optional call: the pre-store legacy test mirrors render
+  // store mutation. Optional call: the pre-store legacy test mirror render
   // the rail without the store seat (useStore undefined) and simply read no
   // bookmarks.
   const bookmarkedKeys = useStore?.((s) => s.keys) ?? NO_BOOKMARKS
@@ -444,8 +501,9 @@ export function MilestoneRail({
   // `separatorsAt` names the item indices where a group boundary sits.
   const groups = useMemo(() => buildTurnGroups(displayMarks), [displayMarks])
   const render = useMemo(() => buildRenderList(groups, collapsedTurns), [groups, collapsedTurns])
-  // C4: `separatorsAt[k]` is the items-index where group k+1 starts, so the
-  // dot at that index carries that group's turn — the separator's data-turn.
+  // B-design: the old separator LINE is gone — `separatorsAt[k]` now marks the
+  // items-index where group k+1 starts; the dot at that index gets the extra
+  // group gap (data-turn-gap) and carries that group's turn.
   const separatorIndices = useMemo(() => new Set(render.separatorsAt), [render])
   // C4: keys of dots rendered as a collapsed turn's summary (the turn's LAST
   // mark), mapped to that group's mark count. Mirrors buildRenderList's
@@ -470,63 +528,75 @@ export function MilestoneRail({
     return counts
   }, [displayMarks])
 
-  // Position the rail at the conversation scrollport's right edge. Depends only
-  // on mark count (not mark content) so it re-runs on length changes, not on
-  // every message update.
-  useLayoutEffect(() => {
-    if (marks.length < MIN_MARKS) {
-      setRailBox(null)
-      return
-    }
-    const scrollport = document.querySelector<HTMLElement>('[data-conversation-scroll]')
-    if (scrollport === null) return
-    const compute = (): void => {
-      const sp = scrollport.getBoundingClientRect()
-      setRailBox({
-        top: sp.top,
-        height: sp.height,
-        right: Math.max(8, window.innerWidth - sp.right + RAIL_INSET),
-      })
-    }
-    compute()
-    const observer = new ResizeObserver(compute)
-    observer.observe(scrollport)
-    window.addEventListener('resize', compute)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', compute)
-    }
-  }, [marks.length])
+  // B-design personalization: the FULL toolbar prefs blob (hydrated once from
+  // localStorage). Every toggle writes through to localStorage immediately, so
+  // render state and the persisted blob never diverge. Backward compatible:
+  // an old `{pinned}`-only blob parses with the new fields at their defaults.
+  const [prefs, setPrefs] = useState<ToolbarPrefs>(() => loadPrefs())
+  const { pinned, accent, iconSize, inset, side } = prefs
+  // Derived metrics: the icon-size slider IS the hit area (20-36px); the dot
+  // diameter and pitch scale proportionally from the classic 28/14/14 values.
+  const scale = iconSize / DOT_HIT
+  const hit = iconSize
+  const size = DOT_SIZE * scale
+  const gap = DOT_GAP * scale
+  // Sourced accent tokens (always canonical after the prefs sanitizer).
+  const accentSoft = lighten(accent, 0.42) ?? '#9db8ff'
+  const accentBg = rgbaString(accent, 0.18) ?? 'rgba(77, 124, 254, 0.18)'
+  const accentStrong = rgbaString(accent, 0.55) ?? 'rgba(77, 124, 254, 0.55)'
 
-  // Keep the roving tab stop inside the dot list when it shrinks (the
-  // bookmarks-only filter or a collapsed turn narrows the dots): an
-  // out-of-range focusIndex would leave the widget with NO tab stop at all.
-  useLayoutEffect(() => {
-    setFocusIndex((f) => clampIndex(f, render.items.length))
-  }, [render.items.length])
+  /**
+   * Language override (settings → 语言): `system` delegates to the harness
+   * `t` seat (the framework-synthesized interpreter for the registered
+   * `dsh-milestone` namespace); `zh`/`en` force the plugin's own dictionaries
+   * so the rail copy switches independently of the host UI language. Every
+   * call site below — rail chrome, panels, tooltip and the settings modal —
+   * already resolves through this binding, so the override is global to the
+   * rail without threading a second translate prop anywhere.
+   */
+  const t: TranslateNS<'dsh-milestone'> = prefs.locale === 'system'
+    ? frameworkT
+    : prefs.locale === 'en'
+      ? (key, params) => translateDict(en, key, params)
+      : (key, params) => translateDict(zh, key, params)
 
-  // P3: Escape closes the floating panels (list + cross-session search) no
-  // matter where focus sits — they are fixed floating layers, so the window
-  // owns the dismiss keystroke.
-  useEffect(() => {
-    if (!listOpen && !crossOpen) return
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      setListOpen(false)
-      setCrossOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [listOpen, crossOpen])
+  /** Write a patch of prefs through to state + localStorage. */
+  const updatePrefs = (patch: Partial<ToolbarPrefs>): void => {
+    setPrefs((prev) => {
+      const next = { ...prev, ...patch }
+      savePrefs(next)
+      return next
+    })
+  }
 
-  // B1 collapsible toolbar: the function-key area folds to an expand arrow +
-  // settings gear; only the user's pinned features stay visible while folded.
-  // `pinned` is hydrated ONCE from localStorage (sanitized by toolbar-prefs)
-  // and every toggle write-throughs — the render state and the persisted blob
-  // never diverge.
+  /** B1: flip one feature's pin — state and the persisted blob update together. */
+  const onTogglePin = (id: ToolbarPinId): void => {
+    setPrefs((prev) => {
+      const next = togglePin(prev, id)
+      savePrefs(next)
+      return next
+    })
+  }
+
+  /** B-design: 恢复默认 resets EVERYTHING — pins AND personalization. */
+  const onResetAll = (): void => {
+    const next = { ...DEFAULT_PREFS }
+    setPrefs(next)
+    savePrefs(next)
+  }
+
+  // B1 collapsible toolbar: the function-key area folds to an expand arrow;
+  // only the user's pinned features (including a possibly-pinned settings
+  // gear) stay visible while folded.
   const [toolbarExpanded, setToolbarExpanded] = useState(false)
+  // Hover states for the two chrome buttons whose accent hover color cannot be
+  // expressed inline (the gear/arrow `:hover` tints).
+  const [expandHovered, setExpandHovered] = useState(false)
+  const [settingsHovered, setSettingsHovered] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [pinned, setPinned] = useState<ToolbarPinId[]>(() => loadPrefs())
+  /** The feature whose description the settings modal's right pane shows
+   * (defaults to the first registry feature — 'search'). */
+  const [descFeature, setDescFeature] = useState<ToolbarPinId>('search')
   const settingsRef = useRef<HTMLDivElement>(null)
   const settingsBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -538,11 +608,12 @@ export function MilestoneRail({
   const updateBtnRef = useRef<HTMLButtonElement>(null)
 
   /**
-   * B1 settings menu: outside-pointerdown dismisses the menu (shared
+   * B1 settings modal: outside-pointerdown dismisses it (shared
    * useOutsideDismiss contract) with focus returning to the gear afterwards.
-   * The gear's own click keeps its flip semantics through a
-   * `[data-toolbar-settings]` exclusion — pointerdown on an armed gear must
-   * not double-close.
+   * The modal's full-screen overlay wraps the dialog, so a pointerdown on the
+   * backdrop (or anywhere outside the dialog) closes it; the gear's own click
+   * keeps its flip semantics through a `[data-toolbar-settings]` exclusion —
+   * pointerdown on an armed gear must not double-close.
    */
   useOutsideDismiss(
     settingsRef,
@@ -554,7 +625,7 @@ export function MilestoneRail({
     { exclude: (target) => outsideDismissMatches(target, '[data-toolbar-settings]') },
   )
 
-  // B1: Escape closes the settings menu (its own keystroke owner, mirroring
+  // B1: Escape closes the settings modal (its own keystroke owner, mirroring
   // the list/cross panels) and returns focus to the gear.
   useEffect(() => {
     if (!settingsOpen) return
@@ -565,6 +636,15 @@ export function MilestoneRail({
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+  }, [settingsOpen])
+
+  // B-design: while the modal is open, move focus INTO the dialog (the close
+  // button); closing is handled by the dismiss paths, which restore focus to
+  // the gear.
+  useEffect(() => {
+    if (!settingsOpen) return
+    const closeBtn = settingsRef.current?.querySelector<HTMLElement>('[data-toolbar-settings-close]')
+    closeBtn?.focus()
   }, [settingsOpen])
 
   /**
@@ -696,6 +776,72 @@ export function MilestoneRail({
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
 
+  // Position the rail at the conversation scrollport's chosen edge (settings
+  // side). Depends on mark count + inset (the edge offset), not mark content,
+  // so it re-runs on length/inset changes, not on every message update.
+  useLayoutEffect(() => {
+    if (marks.length < MIN_MARKS) {
+      setRailBox(null)
+      return
+    }
+    const scrollport = document.querySelector<HTMLElement>('[data-conversation-scroll]')
+    if (scrollport === null) return
+    const compute = (): void => {
+      const sp = scrollport.getBoundingClientRect()
+      setRailBox({
+        top: sp.top,
+        height: sp.height,
+        right: Math.max(0, window.innerWidth - sp.right + inset),
+        left: Math.max(0, sp.left + inset),
+      })
+    }
+    compute()
+    const observer = new ResizeObserver(compute)
+    observer.observe(scrollport)
+    window.addEventListener('resize', compute)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', compute)
+    }
+  }, [marks.length, inset])
+
+  // Keep the roving tab stop inside the dot list when it shrinks (the
+  // bookmarks-only filter or a collapsed turn narrows the dots): an
+  // out-of-range focusIndex would leave the widget with NO tab stop at all.
+  useLayoutEffect(() => {
+    setFocusIndex((f) => clampIndex(f, render.items.length))
+  }, [render.items.length])
+
+  // F4: the transient pulsing badge (running/awaiting) can only wear the
+  // NEWEST displayed mark, so its glow color is computable up front; the rail
+  // injects the breathing-glow keyframes for exactly that color while it is
+  // on screen (the badge span references the `milestone-badge-pulse` name).
+  const lastBadge = useMemo<BadgeKind | null>(() => {
+    if (displayMarks.length === 0) return null
+    const last = displayMarks[displayMarks.length - 1]
+    const kinds = last.turn === undefined ? NO_KINDS : kindsByTurn.get(last.turn) ?? NO_KINDS
+    return deriveBadge({ nodeKinds: kinds, lastMark: true, running, awaitingInput })
+  }, [displayMarks, kindsByTurn, running, awaitingInput])
+  const pulseCss = useMemo(() => {
+    if (lastBadge === null) return null
+    const style = badgeRingStyle(lastBadge)
+    return style.pulse ? badgePulseCss(style.color) : null
+  }, [lastBadge])
+
+  // P3: Escape closes the floating panels (list + cross-session search) no
+  // matter where focus sits — they are fixed floating layers, so the window
+  // owns the dismiss keystroke.
+  useEffect(() => {
+    if (!listOpen && !crossOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setListOpen(false)
+      setCrossOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [listOpen, crossOpen])
+
   if (railBox === null || marks.length < MIN_MARKS) return null
 
   const updateQuery = (query: string): void => {
@@ -723,31 +869,52 @@ export function MilestoneRail({
     if (e.key === 'Escape') closeSearch()
   }
 
-  /** B1: flip one feature's pin — state and the persisted blob update together. */
-  const onTogglePin = (id: ToolbarPinId): void => {
-    setPinned((prev) => {
-      const next = togglePin(prev, id)
-      savePrefs(next)
-      return next
-    })
-  }
+  /**
+   * B-design: viewport `right` offset for the floating layers. On the classic
+   * right-side rail the panels sit left of the rail (their right edge at
+   * railBox.right + hit + 8); on a LEFT rail every layer flips to the rail's
+   * OTHER side — its left edge at railBox.left + hit + 8, which means its
+   * viewport `right` must be backed out from the (known) panel width.
+   */
+  const panelRightFor = (panelWidth: number): number =>
+    side === 'left'
+      ? window.innerWidth - (railBox.left + hit + 8 + panelWidth)
+      : railBox.right + hit + 8
 
-  /** B1: reset every pin (everything folds away) and persist the empty set. */
-  const onResetPins = (): void => {
-    setPinned([])
-    savePrefs([])
+  /** Close the settings modal via its backdrop/close button paths. */
+  const closeSettings = (): void => {
+    setSettingsOpen(false)
+    settingsBtnRef.current?.focus()
   }
 
   /** B1: a feature renders while the toolbar is EXPANDED or while it is pinned. */
   const featureVisible = (id: ToolbarPinId): boolean => toolbarExpanded || pinned.includes(id)
 
+  /** Base chrome-button style: accent-defined active tint, scaled hit area. */
+  const chromeButtonStyle = (active: boolean): CSSProperties => ({
+    width: hit,
+    height: hit,
+    flexShrink: 0,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: active ? accentBg : 'transparent',
+    border: 'none',
+    padding: 0,
+    cursor: 'pointer',
+    color: active ? accentSoft : '#8b96ab',
+    transition: 'background 120ms ease, color 120ms ease',
+  })
+
   /**
    * B1: the data-driven feature registry. Each entry's render is the feature's
-   * UNCHANGED rail-top chrome (data attributes / aria semantics preserved),
-   * moved verbatim from the previous static button block; `search` is the
-   * whole RailSearchUi (toggle + panel) so its lifecycle stays component-local
-   * in the rail (search state lives in the rail and survives unmount).
-   * Registry order = settings-menu order (站内搜索/全部提问/跨会话搜索/只看收藏/聚焦模式).
+   * rail-top chrome (data attributes / aria semantics preserved), moved
+   * verbatim from the previous static button block; `search` is the whole
+   * RailSearchUi (toggle + panel) so its lifecycle stays component-local in
+   * the rail (search state lives in the rail and survives unmount). `settings`
+   * lives LAST in the queue — the gear is a regular, default-unpinned feature;
+   * the modal must stay reachable via 展开→齿轮.
+   * Registry order = settings-menu order (站内搜索/全部提问/跨会话搜索/只看收藏/聚焦模式/检查更新/设置).
    *
    * EXTENSION POINT: push a new feature here (+ its id in toolbar-prefs.ts's
    * TOOLBAR_PIN_IDS and its locale keys) and pinning/settings/expand all
@@ -760,7 +927,7 @@ export function MilestoneRail({
       render: () => (
         <RailSearchUi
           panelTop={railBox.top}
-          panelRight={railBox.right + DOT_HIT + 8}
+          panelRight={panelRightFor(PANEL_WIDTH_SEARCH)}
           query={search.query}
           panelOpen={search.panelOpen}
           matches={matches.length}
@@ -784,19 +951,7 @@ export function MilestoneRail({
           title={listOpen ? t('list.close') : t('list.open')}
           aria-pressed={listOpen}
           onClick={() => setListOpen((v) => !v)}
-          style={{
-            width: DOT_HIT,
-            height: DOT_HIT,
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: listOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
-            border: 'none',
-            padding: 0,
-            cursor: 'pointer',
-            color: listOpen ? '#9db8ff' : '#8b96ab',
-          }}
+          style={chromeButtonStyle(listOpen)}
         >
           <svg
             width="16"
@@ -826,19 +981,7 @@ export function MilestoneRail({
           title={crossOpen ? t('search.cross.close') : t('search.cross.open')}
           aria-pressed={crossOpen}
           onClick={() => setCrossOpen((v) => !v)}
-          style={{
-            width: DOT_HIT,
-            height: DOT_HIT,
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: crossOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
-            border: 'none',
-            padding: 0,
-            cursor: 'pointer',
-            color: crossOpen ? '#9db8ff' : '#8b96ab',
-          }}
+          style={chromeButtonStyle(crossOpen)}
         >
           {/* A list of rows with a magnifier overlaid — cross-session search. */}
           <svg
@@ -872,19 +1015,7 @@ export function MilestoneRail({
           aria-pressed={bookmarksOnly}
           data-active={bookmarksOnly ? 'true' : undefined}
           onClick={() => setBookmarksOnly((v) => !v)}
-          style={{
-            width: DOT_HIT,
-            height: DOT_HIT,
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: bookmarksOnly ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
-            border: 'none',
-            padding: 0,
-            cursor: 'pointer',
-            color: bookmarksOnly ? '#9db8ff' : '#8b96ab',
-          }}
+          style={chromeButtonStyle(bookmarksOnly)}
         >
           <svg
             width="16"
@@ -912,19 +1043,7 @@ export function MilestoneRail({
           title={focusActive ? t('focus.off') : t('focus.on')}
           aria-pressed={focusActive}
           onClick={() => setFocusActive((v) => !v)}
-          style={{
-            width: DOT_HIT,
-            height: DOT_HIT,
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: focusActive ? 'rgba(126, 226, 168, 0.14)' : 'transparent',
-            border: 'none',
-            padding: 0,
-            cursor: 'pointer',
-            color: focusActive ? '#7ee2a8' : '#8b96ab',
-          }}
+          style={chromeButtonStyle(focusActive)}
         >
           <svg
             width="16"
@@ -957,19 +1076,24 @@ export function MilestoneRail({
           onClick={() => setUpdateOpen((v) => !v)}
           style={{
             position: 'relative',
-            width: DOT_HIT,
-            height: DOT_HIT,
+            width: hit,
+            height: hit,
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            // A pending update tints the button amber so the rail reads the
-            // availability before the popover is ever opened.
-            background: updateOpen || updateCheck.available ? 'rgba(245, 197, 66, 0.14)' : 'transparent',
+            // A pending update tints the button amber (a SEMANTIC signal, not
+            // the accent) so the rail reads the availability before the
+            // popover is ever opened; opening itself uses the accent tint.
+            background: updateCheck.available
+              ? 'rgba(245, 197, 66, 0.14)'
+              : updateOpen
+                ? accentBg
+                : 'transparent',
             border: 'none',
             padding: 0,
             cursor: 'pointer',
-            color: updateCheck.available ? '#f5c542' : '#8b96ab',
+            color: updateCheck.available ? '#f5c542' : updateOpen ? accentSoft : '#8b96ab',
           }}
         >
           {/* refresh-cw: circular arrows — the update affordance. */}
@@ -1005,6 +1129,44 @@ export function MilestoneRail({
               }}
             />
           )}
+        </button>
+      ),
+    },
+    {
+      // B-design: the settings gear is the LAST registry feature (default
+      // unpinned). aria-pressed mirrors the modal's open state; the render is
+      // the same chrome the gear always had, moved into the registry.
+      id: 'settings',
+      labelKey: 'settings.label',
+      render: () => (
+        <button
+          type="button"
+          ref={settingsBtnRef}
+          data-toolbar-settings
+          aria-pressed={settingsOpen}
+          aria-label={settingsOpen ? t('toolbar.settings.close') : t('toolbar.settings.open')}
+          title={settingsOpen ? t('toolbar.settings.close') : t('toolbar.settings.open')}
+          onClick={() => setSettingsOpen((v) => !v)}
+          onMouseEnter={() => setSettingsHovered(true)}
+          onMouseLeave={() => setSettingsHovered(false)}
+          onFocus={() => setSettingsHovered(true)}
+          onBlur={() => setSettingsHovered(false)}
+          style={chromeButtonStyle(settingsOpen || settingsHovered)}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
         </button>
       ),
     },
@@ -1138,34 +1300,49 @@ export function MilestoneRail({
     void forkAt(mark.seq).then(() => setForkedKey(mark.key))
   }
 
-  const dotPitch = DOT_HIT + DOT_GAP
   // F3: an earlier page exists and the rail is rendered (marks >= MIN_MARKS is
   // already guaranteed past the early return above; kept explicit so the
   // affordance's precondition reads as one named fact).
   const showLoadOlder = hasMore && marks.length >= MIN_MARKS
 
+  // B-design: rail root carries both the geometry AND the personalization as
+  // CSS variables + data attributes (test hooks + downstream CSS consumers).
+  const railStyle = {
+    position: 'fixed',
+    top: railBox.top,
+    ...(side === 'left' ? { left: railBox.left } : { right: railBox.right }),
+    height: railBox.height,
+    width: hit,
+    pointerEvents: 'auto',
+    zIndex: 100,
+    display: 'flex',
+    flexDirection: 'column',
+    // Breathing room between the rail-top control buttons and a little
+    // inset from the scrollport edge so the top button isn't flush.
+    gap: 6,
+    paddingTop: 6,
+    '--ms-accent': accent,
+    '--ms-accent-soft': accentSoft,
+    '--ms-accent-bg': accentBg,
+    '--ms-icon': `${iconSize}px`,
+    '--ms-inset': `${inset}px`,
+  } as unknown as CSSProperties
+
+  const descKey = `settings.desc.${descFeature}` as MilestoneKey
+
   return (
     <div
-      style={{
-        position: 'fixed',
-        top: railBox.top,
-        right: railBox.right,
-        height: railBox.height,
-        width: DOT_HIT,
-        pointerEvents: 'auto',
-        zIndex: 100,
-        display: 'flex',
-        flexDirection: 'column',
-        // Breathing room between the rail-top control buttons and a little
-        // inset from the scrollport edge so the top button isn't flush.
-        gap: 6,
-        paddingTop: 6,
-      }}
+      style={railStyle}
       aria-label={t('rail.label')}
       data-focus-active={focusActive ? 'true' : undefined}
+      data-accent={accent}
+      data-side={side}
+      data-icon-size={String(iconSize)}
+      data-inset={String(inset)}
     >
-      <style>{BADGE_PULSE_CSS}</style>
+      {pulseCss !== null && <style>{pulseCss}</style>}
       {focusActive && <style>{FOCUS_CSS}</style>}
+      <style>{MODAL_CSS}</style>
       {showLoadOlder && (
         <button
           type="button"
@@ -1176,8 +1353,8 @@ export function MilestoneRail({
           disabled={loadingOlder}
           onClick={() => { void loadOlder() }}
           style={{
-            width: DOT_HIT,
-            height: DOT_HIT,
+            width: hit,
+            height: hit,
             flexShrink: 0,
             display: 'flex',
             alignItems: 'center',
@@ -1197,8 +1374,9 @@ export function MilestoneRail({
       )}
 
       {/* B1 collapsible toolbar: the function-key area. Collapsed by default —
-          only the expand arrow, the settings gear, and the user's PINNED
-          features render; everything else mounts only while expanded. */}
+          only the expand arrow and the user's PINNED features render; the
+          settings gear is a regular feature (default unpinned) so it appears
+          only when expanded or pinned. */}
       <button
         type="button"
         data-toolbar-expand
@@ -1206,19 +1384,11 @@ export function MilestoneRail({
         aria-label={toolbarExpanded ? t('toolbar.collapse') : t('toolbar.expand')}
         title={toolbarExpanded ? t('toolbar.collapse') : t('toolbar.expand')}
         onClick={() => setToolbarExpanded((v) => !v)}
-        style={{
-          width: DOT_HIT,
-          height: DOT_HIT,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: 'transparent',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          color: '#8b96ab',
-        }}
+        onMouseEnter={() => setExpandHovered(true)}
+        onMouseLeave={() => setExpandHovered(false)}
+        onFocus={() => setExpandHovered(true)}
+        onBlur={() => setExpandHovered(false)}
+        style={chromeButtonStyle(expandHovered)}
       >
         {/* Collapsed: chevron-down (expand reveals the features below);
             expanded: chevron-up (collapse tucks them away). */}
@@ -1237,199 +1407,451 @@ export function MilestoneRail({
         </svg>
       </button>
 
-      <button
-        type="button"
-        ref={settingsBtnRef}
-        data-toolbar-settings
-        aria-expanded={settingsOpen}
-        aria-label={settingsOpen ? t('toolbar.settings.close') : t('toolbar.settings.open')}
-        title={settingsOpen ? t('toolbar.settings.close') : t('toolbar.settings.open')}
-        onClick={() => setSettingsOpen((v) => !v)}
-        style={{
-          width: DOT_HIT,
-          height: DOT_HIT,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: settingsOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          color: settingsOpen ? '#9db8ff' : '#8b96ab',
-        }}
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-        </svg>
-      </button>
-
       {toolbarFeatures.map((feature) =>
         featureVisible(feature.id) ? <Fragment key={feature.id}>{feature.render()}</Fragment> : null,
       )}
 
       {settingsOpen && (
         <div
-          ref={settingsRef}
-          data-toolbar-settings-panel
+          data-toolbar-settings-overlay
+          onClick={closeSettings}
           style={{
             position: 'fixed',
-            top: railBox.top,
-            right: railBox.right + DOT_HIT + 8,
-            // Clamp so the menu never overflows a narrow viewport.
-            width: 'min(240px, calc(100vw - 48px))',
-            padding: '10px 12px',
-            background: 'rgba(20, 24, 32, 0.97)',
-            color: '#e6e8ee',
-            borderRadius: 8,
-            boxShadow: '0 6px 20px rgba(0, 0, 0, 0.4)',
-            zIndex: 104,
+            inset: 0,
+            background: 'rgba(8, 10, 15, 0.55)',
+            zIndex: 105,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
           }}
         >
-          {/* Row hover highlight, inline like the list panel's. */}
-          <style>{`[data-toolbar-pin-toggle]:hover { background: rgba(77, 124, 254, 0.18); }`}</style>
           <div
-            data-toolbar-settings-title
-            style={{ fontSize: 13, fontWeight: 600, color: '#e6e8ee', marginBottom: 2 }}
-          >
-            {t('settings.title')}
-          </div>
-          {/* Column caption for the pin checkboxes — the "show outside
-              collapse" knob each row toggles. */}
-          <div
-            style={{ fontSize: 12, color: '#8b96ab', marginBottom: 4, textAlign: 'right' }}
-          >
-            {t('settings.pin')}
-          </div>
-          <div
-            role="menu"
+            ref={settingsRef}
+            data-toolbar-settings-panel
+            role="dialog"
+            aria-modal="true"
             aria-label={t('settings.title')}
-            style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 'min(600px, 92vw)',
+              maxHeight: '78vh',
+              overflowY: 'auto',
+              padding: '16px 18px',
+              background: 'rgba(20, 24, 32, 0.98)',
+              color: '#e6e8ee',
+              borderRadius: 12,
+              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+            }}
           >
-            {toolbarFeatures.map((feature) => {
-              const checked = pinned.includes(feature.id)
-              return (
-                <button
-                  key={feature.id}
-                  type="button"
-                  role="menuitemcheckbox"
-                  data-toolbar-pin-toggle
-                  data-pin-id={feature.id}
-                  aria-checked={checked}
-                  onClick={() => onTogglePin(feature.id)}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 8,
+                marginBottom: 12,
+              }}
+            >
+              <div data-toolbar-settings-title style={{ fontSize: 15, fontWeight: 600, color: '#e6e8ee' }}>
+                {t('settings.title')}
+              </div>
+              <button
+                type="button"
+                data-toolbar-settings-close
+                aria-label={t('settings.close')}
+                title={t('settings.close')}
+                onClick={closeSettings}
+                style={{
+                  width: 26,
+                  height: 26,
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'transparent',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  color: '#8b96ab',
+                  borderRadius: 6,
+                  fontSize: 14,
+                  lineHeight: 1,
+                }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* ① 功能与快捷区 — one row per feature with the "show outside
+                collapse" switch; hovering/focusing a row reveals its
+                description in the fixed right pane (chosen over inline
+                expansion: no layout jump, the description is always visible). */}
+            <div data-settings-section style={{ marginBottom: 14 }}>
+              <div
+                data-settings-section-title
+                style={{ fontSize: 13, fontWeight: 600, color: '#c7cede', marginBottom: 8 }}
+              >
+                {t('settings.section.features')}
+              </div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1fr) 190px',
+                  gap: 12,
+                  alignItems: 'stretch',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {toolbarFeatures.map((feature) => {
+                    const checked = pinned.includes(feature.id)
+                    return (
+                      <button
+                        key={feature.id}
+                        type="button"
+                        role="switch"
+                        data-toolbar-pin-toggle
+                        data-pin-id={feature.id}
+                        aria-checked={checked}
+                        aria-label={t(feature.labelKey)}
+                        onMouseEnter={() => setDescFeature(feature.id)}
+                        onFocus={() => setDescFeature(feature.id)}
+                        onClick={() => onTogglePin(feature.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 10,
+                          width: '100%',
+                          padding: '7px 10px',
+                          background: 'transparent',
+                          border: 'none',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          color: '#e6e8ee',
+                          fontSize: 13,
+                          textAlign: 'left',
+                        }}
+                      >
+                        <span>{t(feature.labelKey)}</span>
+                        {/* Switch track + thumb; accent-colored when checked. */}
+                        <span
+                          aria-hidden="true"
+                          style={{
+                            position: 'relative',
+                            width: 32,
+                            height: 18,
+                            flexShrink: 0,
+                            borderRadius: 9,
+                            background: checked ? accentStrong : 'rgba(255, 255, 255, 0.16)',
+                            transition: 'background 120ms ease',
+                          }}
+                        >
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: 2,
+                              left: checked ? 16 : 2,
+                              width: 14,
+                              height: 14,
+                              borderRadius: '50%',
+                              background: '#ffffff',
+                              transition: 'left 120ms ease',
+                            }}
+                          />
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* Fixed hover-description pane: always visible, swaps per
+                    hovered/focused row — behaves on touch via focus too. */}
+                <div
+                  data-settings-desc
+                  aria-live="polite"
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    width: '100%',
-                    padding: '6px 8px',
-                    background: 'transparent',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    color: '#e6e8ee',
-                    fontSize: 13,
-                    textAlign: 'left',
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    color: '#b9c2d4',
+                    fontSize: 12.5,
+                    lineHeight: 1.5,
                   }}
                 >
-                  <span>{t(feature.labelKey)}</span>
-                  <span
-                    aria-hidden="true"
+                  {t(descKey)}
+                </div>
+              </div>
+            </div>
+
+            {/* ② 个性化 — accent, icon/dot size, edge distance, side; every
+                control writes through to toolbar-prefs immediately. */}
+            <div data-settings-section data-settings-personal style={{ marginBottom: 14 }}>
+              <div
+                data-settings-section-title
+                style={{ fontSize: 13, fontWeight: 600, color: '#c7cede', marginBottom: 8 }}
+              >
+                {t('settings.section.personal')}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {/* Accent: preset swatches + custom color input. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
+                    {t('settings.accent')}
+                  </span>
+                  <div data-accent-swatches style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    {ACCENT_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        data-accent-swatch
+                        data-accent={preset}
+                        aria-label={preset}
+                        aria-pressed={accent === preset}
+                        onClick={() => updatePrefs({ accent: preset })}
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: '50%',
+                          background: preset,
+                          border:
+                            accent === preset
+                              ? '2px solid #ffffff'
+                              : '2px solid rgba(255, 255, 255, 0.25)',
+                          boxShadow: accent === preset ? `0 0 0 2px ${preset}` : 'none',
+                          padding: 0,
+                          cursor: 'pointer',
+                          transition: 'border-color 120ms ease, box-shadow 120ms ease',
+                        }}
+                      />
+                    ))}
+                    <label
+                      data-accent-custom
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        fontSize: 12.5,
+                        color: '#b9c2d4',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="color"
+                        value={accent}
+                        onChange={(e) => updatePrefs({ accent: e.target.value })}
+                        aria-label={`${t('settings.custom')} ${t('settings.accent')}`}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          padding: 0,
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                        }}
+                      />
+                      {t('settings.custom')}
+                    </label>
+                  </div>
+                </div>
+                {/* Icon/dot size slider (20-36, step 2) — scales every dot metric. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
+                    {t('settings.iconSize')}
+                  </span>
+                  <input
+                    type="range"
+                    data-icon-size
+                    min={20}
+                    max={36}
+                    step={2}
+                    value={iconSize}
+                    onChange={(e) => updatePrefs({ iconSize: Number(e.target.value) })}
+                    style={{ flex: 1, minWidth: 140, maxWidth: 260 }}
+                  />
+                  <span data-icon-size-value style={{ fontSize: 12.5, color: '#b9c2d4', width: 40 }}>
+                    {iconSize}px
+                  </span>
+                </div>
+                {/* Edge distance slider (0-40, step 2) — replaces RAIL_INSET. */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
+                    {t('settings.inset')}
+                  </span>
+                  <input
+                    type="range"
+                    data-inset
+                    min={0}
+                    max={40}
+                    step={2}
+                    value={inset}
+                    onChange={(e) => updatePrefs({ inset: Number(e.target.value) })}
+                    style={{ flex: 1, minWidth: 140, maxWidth: 260 }}
+                  />
+                  <span data-inset-value style={{ fontSize: 12.5, color: '#b9c2d4', width: 40 }}>
+                    {inset}px
+                  </span>
+                </div>
+                {/* Rail side radio group — left flips every floating layer. */}
+                <div role="radiogroup" aria-label={t('settings.side')} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
+                    {t('settings.side')}
+                  </span>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: '#e6e8ee', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="ms-rail-side"
+                      data-side-radio
+                      value="left"
+                      checked={side === 'left'}
+                      onChange={() => updatePrefs({ side: 'left' as RailSide })}
+                    />
+                    {t('settings.side.left')}
+                  </label>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: '#e6e8ee', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="ms-rail-side"
+                      data-side-radio
+                      value="right"
+                      checked={side === 'right'}
+                      onChange={() => updatePrefs({ side: 'right' as RailSide })}
+                    />
+                    {t('settings.side.right')}
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* ②.5 语言 — the rail copy follows the harness locale, or is
+                forced here to the plugin's own zh/en dictionaries. */}
+            <div data-settings-section data-settings-lang style={{ marginBottom: 14 }}>
+              <div
+                data-settings-section-title
+                style={{ fontSize: 13, fontWeight: 600, color: '#c7cede', marginBottom: 8 }}
+              >
+                {t('settings.language')}
+              </div>
+              <div
+                role="radiogroup"
+                aria-label={t('settings.language')}
+                style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}
+              >
+                {(['system', 'zh', 'en'] as const).map((value) => (
+                  <label
+                    key={value}
                     style={{
-                      width: 14,
-                      height: 14,
-                      flexShrink: 0,
-                      borderRadius: 3,
-                      border: '1px solid rgba(255, 255, 255, 0.35)',
-                      background: checked ? 'rgba(77, 124, 254, 0.9)' : 'transparent',
-                      display: 'flex',
+                      display: 'inline-flex',
                       alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#ffffff',
-                      fontSize: 10,
-                      lineHeight: 1,
+                      gap: 5,
+                      fontSize: 13,
+                      color: '#e6e8ee',
+                      cursor: 'pointer',
                     }}
                   >
-                    {checked ? '✓' : ''}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-          <button
-            type="button"
-            data-toolbar-settings-reset
-            onClick={onResetPins}
-            style={{
-              width: '100%',
-              marginTop: 6,
-              padding: '6px 8px',
-              background: 'transparent',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              color: '#8b96ab',
-              fontSize: 13,
-              textAlign: 'left',
-            }}
-          >
-            {t('settings.reset')}
-          </button>
-          <div
-            data-toolbar-settings-footer
-            style={{
-              marginTop: 8,
-              paddingTop: 8,
-              borderTop: '1px solid rgba(255, 255, 255, 0.12)',
-            }}
-          >
-            <div style={{ fontSize: 12, color: '#8b96ab', marginBottom: 6 }}>{t('settings.support')}</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <a
-                href={PLUGIN_REPO_URL}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
-              >
-                {t('settings.repo')}
-              </a>
-              <a
-                href={PLUGIN_REPO_URL}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
-              >
-                {t('settings.star')}
-              </a>
-              <a
-                href={`${PLUGIN_REPO_URL}/issues`}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
-              >
-                {t('settings.issues')}
-              </a>
-              <a
-                href={PLUGIN_NPM_URL}
-                target="_blank"
-                rel="noreferrer"
-                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
-              >
-                {t('settings.npm')}
-              </a>
+                    <input
+                      type="radio"
+                      name="ms-rail-locale"
+                      data-locale-pref
+                      value={value}
+                      checked={prefs.locale === value}
+                      onChange={() => updatePrefs({ locale: value })}
+                    />
+                    {t(`settings.lang.${value}`)}
+                  </label>
+                ))}
+              </div>
             </div>
+
+            {/* ③ 支持我们 — compact 2×2 card grid (whole card clickable,
+                _blank+noreferrer, hover micro-lift via MODAL_CSS). */}
+            <div data-toolbar-settings-footer style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: '#8b96ab', marginBottom: 10 }}>
+                {t('settings.support')}
+              </div>
+              <div
+                data-support-grid
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                  gap: 10,
+                  maxWidth: 460,
+                  margin: '0 auto',
+                }}
+              >
+                <a
+                  href={PLUGIN_REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-support-card
+                  data-card="repo"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+                  </svg>
+                  <span>{t('settings.repo')}</span>
+                </a>
+                <a
+                  href={PLUGIN_REPO_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-support-card
+                  data-card="star"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+                    <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                  </svg>
+                  <span>{t('settings.star')}</span>
+                </a>
+                <a
+                  href={`${PLUGIN_REPO_URL}/issues`}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-support-card
+                  data-card="issues"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <circle cx="12" cy="12" r="9" />
+                    <path d="M12 8v4" strokeLinecap="round" />
+                    <circle cx="12" cy="16" r="0.5" fill="currentColor" />
+                  </svg>
+                  <span>{t('settings.issues')}</span>
+                </a>
+                <a
+                  href={PLUGIN_NPM_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  data-support-card
+                  data-card="npm"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+                    <path d="M2 8.5h20V15h-6v2.5h-3V15H2V8.5zm1.5 1.5v3.5H6V11.5h1.5v3.5h1.5V10h-4.5zm6 0v5h3V13h2v2h1.5v-5h-6.5z" />
+                  </svg>
+                  <span>{t('settings.npm')}</span>
+                </a>
+              </div>
+            </div>
+
+            {/* 恢复默认 — resets pins AND personalization together. */}
+            <button
+              type="button"
+              data-toolbar-settings-reset
+              onClick={onResetAll}
+              style={{
+                display: 'block',
+                margin: '14px auto 0',
+                padding: '7px 16px',
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.14)',
+                borderRadius: 8,
+                cursor: 'pointer',
+                color: '#b9c2d4',
+                fontSize: 12.5,
+              }}
+            >
+              {t('settings.reset')}
+            </button>
           </div>
         </div>
       )}
@@ -1441,7 +1863,7 @@ export function MilestoneRail({
           style={{
             position: 'fixed',
             top: railBox.top,
-            right: railBox.right + DOT_HIT + 8,
+            right: panelRightFor(PANEL_WIDTH_STANDARD),
             // Clamp so the popover never overflows a narrow viewport.
             width: 'min(280px, calc(100vw - 48px))',
             padding: '10px 12px',
@@ -1486,7 +1908,7 @@ export function MilestoneRail({
                     border: 'none',
                     padding: 0,
                     cursor: 'pointer',
-                    color: '#9db8ff',
+                    color: accentSoft,
                     fontSize: 12,
                     textDecoration: 'underline',
                   }}
@@ -1504,7 +1926,7 @@ export function MilestoneRail({
                       href={PLUGIN_NPM_URL}
                       target="_blank"
                       rel="noreferrer"
-                      style={{ color: '#9db8ff', textDecoration: 'none' }}
+                      style={{ color: accentSoft, textDecoration: 'none' }}
                     >
                       {t('update.goNpm')}
                     </a>
@@ -1526,11 +1948,11 @@ export function MilestoneRail({
               style={{
                 marginTop: 4,
                 padding: '6px 10px',
-                background: updateCheck.phase === 'checking' ? 'transparent' : 'rgba(77, 124, 254, 0.18)',
+                background: updateCheck.phase === 'checking' ? 'transparent' : accentBg,
                 border: 'none',
                 borderRadius: 6,
                 cursor: updateCheck.phase === 'checking' ? 'default' : 'pointer',
-                color: updateCheck.phase === 'checking' ? '#5a6375' : '#9db8ff',
+                color: updateCheck.phase === 'checking' ? '#5a6375' : accentSoft,
                 fontSize: 12,
                 alignSelf: 'flex-start',
               }}
@@ -1544,7 +1966,7 @@ export function MilestoneRail({
       {listOpen && (
         <MilestoneListPanel
           panelTop={railBox.top}
-          panelRight={railBox.right + DOT_HIT + 8}
+          panelRight={panelRightFor(PANEL_WIDTH_STANDARD)}
           // P3: the panel enumerates EVERY user-prompt mark — the search and
           // bookmarks filters never narrow it.
           marks={marks}
@@ -1556,7 +1978,7 @@ export function MilestoneRail({
       {crossOpen && (
         <MilestoneSessionSearch
           panelTop={railBox.top}
-          panelRight={railBox.right + DOT_HIT + 8}
+          panelRight={panelRightFor(PANEL_WIDTH_STANDARD)}
           onClose={() => setCrossOpen(false)}
           searchSessions={searchSessions}
           openSession={openSession}
@@ -1578,16 +2000,18 @@ export function MilestoneRail({
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: DOT_GAP,
+          gap,
           padding: '6px 0',
           scrollbarWidth: 'none',
         }}
       >
         {render.items.map((item, i) => {
-          // C4: this slot opens a new turn group — render a thin boundary
-          // line before the dot. `item.mark.turn` is the group's turn (the
+          // C4 (B-design): this slot opens a new turn group — the FIRST dot of
+          // the new group carries the extra top gap (data-turn-gap) instead of
+          // the old separator line. `item.mark.turn` is the group's turn (the
           // first, or collapsed-summary, mark of the group that starts here).
-          const showSeparator = separatorIndices.has(i)
+          const opensGroup = separatorIndices.has(i)
+          const showGroupGap = opensGroup && i > 0
           // C4: buildTurnGroups narrows marks to {key, turn}; displayIndex is
           // the ORIGINAL flat index (buildRenderList contract), so resolving
           // the full mark (seq/time/text/preview) back through it is exact.
@@ -1612,19 +2036,24 @@ export function MilestoneRail({
             isCurrent: !hasQuery && mark.key === currentKey,
           })
           const isHovered = hover?.mark.key === mark.key
+          // B-design: hover ring and search-hit ring wear the ACCENT; the
+          // active/current position rings stay white (readability) and the
+          // active match adds an accent glow beneath the white core.
           const boxShadow = isHovered
-            ? '0 0 0 3px rgba(77, 124, 254, 0.35)'
+            ? `0 0 0 3px ${rgbaString(accent, 0.35) ?? 'rgba(77, 124, 254, 0.35)'}`
             : dotState === 'active'
-              ? '0 0 0 3px rgba(255, 255, 255, 0.9)'
+              ? `0 0 0 3px rgba(255, 255, 255, 0.9), 0 0 10px 2px ${rgbaString(accent, 0.55) ?? 'rgba(77, 124, 254, 0.55)'}`
               : dotState === 'current'
                 ? '0 0 0 3px rgba(255, 255, 255, 0.75)'
-                : 'none'
+                : dotState === 'match'
+                  ? `0 0 0 2px ${rgbaString(accent, 0.45) ?? 'rgba(77, 124, 254, 0.45)'}`
+                  : 'none'
           // F4: the mark's status badge. Durable kinds (error/max-tokens/
           // retry) come from the nodes stamped on this mark's turn; the
           // transient kinds (running/awaiting) only wear on the newest mark
           // (displayMarks, so the bookmarks filter re-anchors the target).
           // Precedence lives in badge-logic (error > max-tokens > retry >
-          // running > awaiting); the badge ring COMPOSES with markState's
+          // running > awaiting); the badge GLOW composes with markState's
           // ring/shadow/opacity — it is a child of the dot span, so the
           // dimmed-dot opacity scales it down with the dot.
           const badge = deriveBadge({
@@ -1636,24 +2065,11 @@ export function MilestoneRail({
           const ringStyle = badge === null ? null : badgeRingStyle(badge)
           return (
             <Fragment key={mark.key}>
-              {showSeparator && (
-                <div
-                  data-turn-separator
-                  data-turn={mark.turn === undefined ? undefined : mark.turn}
-                  style={{
-                    width: DOT_HIT - 8,
-                    height: 1,
-                    flexShrink: 0,
-                    background: 'rgba(139, 150, 171, 0.35)',
-                    borderRadius: 1,
-                  }}
-                />
-              )}
               <button
                 type="button"
                 style={{
-                  width: DOT_HIT,
-                  height: DOT_HIT,
+                  width: hit,
+                  height: hit,
                   flexShrink: 0,
                   display: 'flex',
                   alignItems: 'center',
@@ -1662,6 +2078,7 @@ export function MilestoneRail({
                   border: 'none',
                   padding: 0,
                   cursor: 'pointer',
+                  marginTop: showGroupGap ? GROUP_GAP_EXTRA : 0,
                 }}
                 onMouseEnter={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect()
@@ -1669,6 +2086,8 @@ export function MilestoneRail({
                 }}
                 onClick={() => jump(mark.key)}
                 data-rail-dot
+                data-turn-gap={showGroupGap ? 'true' : undefined}
+                data-turn={showGroupGap && mark.turn !== undefined ? mark.turn : undefined}
                 data-collapsed-summary={summaryCount !== undefined ? 'true' : undefined}
                 data-collapsed-count={summaryCount}
                 tabIndex={focusIndex === i ? 0 : -1}
@@ -1681,10 +2100,10 @@ export function MilestoneRail({
                 <span
                   style={{
                     position: 'relative',
-                    width: DOT_SIZE,
-                    height: DOT_SIZE,
+                    width: size,
+                    height: size,
                     borderRadius: '50%',
-                    background: dotColor(item.displayIndex, marks.length),
+                    background: dotColor(item.displayIndex, marks.length, accent),
                     boxShadow,
                     transition: 'transform 120ms ease, opacity 120ms ease',
                     transform: `scale(${isHovered ? 1.35 : dotState === 'active' || dotState === 'current' ? 1.25 : 1})`,
@@ -1699,11 +2118,12 @@ export function MilestoneRail({
                         position: 'absolute',
                         inset: -3,
                         borderRadius: '50%',
-                        border: `2px solid ${ringStyle.color}`,
+                        // B-design: soft glow — layered box-shadows, no border.
+                        boxShadow: ringStyle.shadow,
                         color: ringStyle.color,
                         pointerEvents: 'none',
                         animation: ringStyle.pulse
-                          ? 'milestone-badge-pulse 1.4s ease-out infinite'
+                          ? 'milestone-badge-pulse 2s ease-in-out infinite'
                           : undefined,
                       }}
                     />
@@ -1717,7 +2137,7 @@ export function MilestoneRail({
 
       {hover !== null && (
         <MilestoneRailTooltip
-          panelRight={railBox.right + DOT_HIT + 8}
+          panelRight={panelRightFor(TOOLTIP_ANCHOR_WIDTH)}
           hover={hover}
           bookmarked={isBookmarked(bookmarkedKeys, hover.mark.key)}
           onToggleBookmark={() => onToggleBookmark(hover.mark.key)}
@@ -1745,8 +2165,8 @@ export function MilestoneRail({
           style={{
             position: 'absolute',
             bottom: 6,
-            right: '100%',
-            marginRight: 8,
+            // Side-aware: the hint lives on the rail's FREE side, never over it.
+            ...(side === 'left' ? { left: '100%', marginLeft: 8 } : { right: '100%', marginRight: 8 }),
             whiteSpace: 'nowrap',
             fontSize: 12,
             lineHeight: 1,

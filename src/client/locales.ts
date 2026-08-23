@@ -115,6 +115,42 @@ export const zh = {
   'settings.issues': '提交 Issue',
   /** Settings footer link: the npm install channel. */
   'settings.npm': 'npm 安装渠道',
+  /** Settings: feature-row name of the settings key itself (registry row). */
+  'settings.label': '设置',
+  /** aria-label on the settings modal close button. */
+  'settings.close': '关闭',
+  /** Settings modal: section heading for the feature pin rows. */
+  'settings.section.features': '功能与快捷区',
+  /** Settings modal: section heading for the personalization controls. */
+  'settings.section.personal': '个性化',
+  /** Settings: hover description — in-rail search. */
+  'settings.desc.search': '按完整消息内容过滤并跳转到对应消息',
+  /** Settings: hover description — all-prompts list. */
+  'settings.desc.list': '本会话全部提问一览',
+  /** Settings: hover description — cross-session search. */
+  'settings.desc.sessionSearch': '跨会话搜索所有会话',
+  /** Settings: hover description — bookmarks filter. */
+  'settings.desc.bookmarks': '只显示已收藏的消息',
+  /** Settings: hover description — focus mode. */
+  'settings.desc.focus': '淡化 AI 思考块，阅读更清爽',
+  /** Settings: hover description — update check. */
+  'settings.desc.updateCheck': '检查 npm 是否有新版本',
+  /** Settings: hover description — the settings key itself. */
+  'settings.desc.settings': '自定义工具栏与外观',
+  /** Settings personalization: accent color row label. */
+  'settings.accent': '强调色',
+  /** Settings personalization: custom color swatch label. */
+  'settings.custom': '自定义',
+  /** Settings personalization: icon/dot size slider label. */
+  'settings.iconSize': '图标 / 圆点大小',
+  /** Settings personalization: edge-distance slider label. */
+  'settings.inset': '距侧边距离',
+  /** Settings personalization: rail side row label. */
+  'settings.side': '位置',
+  /** Settings personalization: side radio — hug the left edge. */
+  'settings.side.left': '左侧',
+  /** Settings personalization: side radio — hug the right edge. */
+  'settings.side.right': '右侧',
   /** B4 update-check: toolbar button label + title/aria-label. */
   'update.check': '检查更新',
   /** B4 update-check: popover title. */
@@ -137,6 +173,14 @@ export const zh = {
   'update.failed': '检查失败',
   /** B4 update-check: retry action inside the failed state. */
   'update.retry': '重试',
+  /** Settings modal section title: language. */
+  'settings.language': '语言',
+  /** Language option: follow the harness UI language. */
+  'settings.lang.system': '跟随系统',
+  /** Language option: force Chinese copy. */
+  'settings.lang.zh': '中文',
+  /** Language option: force English copy. */
+  'settings.lang.en': 'English',
 } as const
 
 export type MilestoneKey = keyof typeof zh
@@ -194,6 +238,24 @@ export const en: Record<MilestoneKey, string> = {
   'settings.star': 'Give us a Star ★',
   'settings.issues': 'Report an Issue',
   'settings.npm': 'Install via npm',
+  'settings.label': 'Settings',
+  'settings.close': 'Close',
+  'settings.section.features': 'Features & Shortcuts',
+  'settings.section.personal': 'Personalization',
+  'settings.desc.search': 'Filter by full message text and jump to the match',
+  'settings.desc.list': 'Overview of every prompt in this session',
+  'settings.desc.sessionSearch': 'Search across all sessions',
+  'settings.desc.bookmarks': 'Show bookmarked messages only',
+  'settings.desc.focus': 'Dim AI thinking blocks for a cleaner read',
+  'settings.desc.updateCheck': 'Check npm for a newer release',
+  'settings.desc.settings': 'Customize the toolbar and appearance',
+  'settings.accent': 'Accent color',
+  'settings.custom': 'Custom',
+  'settings.iconSize': 'Icon / dot size',
+  'settings.inset': 'Distance from the edge',
+  'settings.side': 'Position',
+  'settings.side.left': 'Left',
+  'settings.side.right': 'Right',
   'update.check': 'Check updates',
   'update.title': 'Update check',
   'update.current': 'Current version',
@@ -205,4 +267,37 @@ export const en: Record<MilestoneKey, string> = {
   'update.checking': 'Checking…',
   'update.failed': 'Check failed',
   'update.retry': 'Retry',
+  'settings.language': 'Language',
+  'settings.lang.system': 'Follow system',
+  'settings.lang.zh': 'Chinese',
+  'settings.lang.en': 'English',
+}
+
+/**
+ * Interpolate `{name}` placeholders with params, matching the harness t seat's
+ * substitution shape; an unknown parameter leaves the placeholder verbatim.
+ */
+export function interpolate(
+  template: string,
+  params?: Record<string, unknown>,
+): string {
+  if (params === undefined) return template
+  return template.replace(/\{([A-Za-z][A-Za-z0-9]*)\}/g, (slot, name: string) =>
+    name in params ? String(params[name]) : slot,
+  )
+}
+
+/**
+ * Dictionary-backed translate for the forced-language override (locale prefs
+ * 'zh' / 'en'): resolves a key against the plugin's own dictionaries with
+ * placeholder interpolation; unknown keys pass through unchanged (same
+ * degradation as the harness seat).
+ */
+export function translateDict(
+  dict: Readonly<Record<MilestoneKey, string>>,
+  key: string,
+  params?: Record<string, unknown>,
+): string {
+  const template = dict[key as MilestoneKey]
+  return template === undefined ? key : interpolate(template, params)
 }

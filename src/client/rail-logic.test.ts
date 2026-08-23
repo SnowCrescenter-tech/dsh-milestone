@@ -146,22 +146,33 @@ describe('markState', () => {
 })
 
 describe('dotColor', () => {
-  it('total <= 1 uses t = 0 (lightest)', () => {
-    expect(dotColor(0, 0)).toBe('hsl(218, 88%, 72%)')
-    expect(dotColor(0, 1)).toBe('hsl(218, 88%, 72%)')
+  it('total <= 1 uses t = 0 (lightest), at the DEFAULT accent hue/saturation', () => {
+    expect(dotColor(0, 0)).toBe('hsl(224, 98%, 72%)')
+    expect(dotColor(0, 1)).toBe('hsl(224, 98%, 72%)')
   })
 
   it('lightness is monotonic non-increasing as index grows (newest deepest)', () => {
-    const lightnessOf = (c: string): number => Number(c.match(/hsl\(218, 88%, (\d+(?:\.\d+)?)%\)/)?.[1])
+    const lightnessOf = (c: string): number => Number(c.match(/hsl\(\d+, \d+%, (\d+(?:\.\d+)?)%\)/)?.[1])
     const values = [0, 1, 2, 3, 4].map((i) => lightnessOf(dotColor(i, 5)))
     for (let i = 1; i < values.length; i++) expect(values[i]).toBeLessThan(values[i - 1])
     expect(values[0]).toBe(72)
     expect(values[4]).toBe(45)
   })
 
-  it('produces the exact existing gradient endpoints', () => {
-    expect(dotColor(0, 3)).toBe('hsl(218, 88%, 72%)')
-    expect(dotColor(1, 3)).toBe('hsl(218, 88%, 58.5%)')
-    expect(dotColor(2, 3)).toBe('hsl(218, 88%, 45%)')
+  it('produces the exact existing gradient endpoints for the default accent', () => {
+    expect(dotColor(0, 3)).toBe('hsl(224, 98%, 72%)')
+    expect(dotColor(1, 3)).toBe('hsl(224, 98%, 58.5%)')
+    expect(dotColor(2, 3)).toBe('hsl(224, 98%, 45%)')
+  })
+
+  it('a custom accent drives hue/saturation but keeps the lightness walk', () => {
+    expect(dotColor(0, 3, '#ff0000')).toBe('hsl(0, 100%, 72%)')
+    expect(dotColor(2, 3, '#ff0000')).toBe('hsl(0, 100%, 45%)')
+    expect(dotColor(0, 3, '#00ff00')).toBe('hsl(120, 100%, 72%)')
+  })
+
+  it('an invalid accent degrades to the default blue gradient', () => {
+    expect(dotColor(0, 2, 'nope')).toBe('hsl(224, 98%, 72%)')
+    expect(dotColor(1, 2, '#fff')).toBe('hsl(224, 98%, 45%)')
   })
 })

@@ -1,25 +1,23 @@
 /**
- * RED component tests for turn grouping (C4): the rail partitions consecutive
- * dots by turn with a thin `data-turn-separator` line at each turn boundary,
- * and a per-turn collapse action in the hover tooltip folds a turn down to its
+ * Component tests for turn grouping (C4 / B-design): the rail partitions
+ * consecutive dots by turn; a group boundary is expressed as SPACING — the
+ * first dot of the new group carries `data-turn-gap` (with its `data-turn`)
+ * and an extra top margin instead of the old `data-turn-separator` line — and
+ * a per-turn collapse action in the hover tooltip folds a turn down to its
  * LAST mark (a `data-collapsed-summary` dot carrying `data-collapsed-count`).
  *
- * The feature is NOT implemented yet — MilestoneRail renders `displayMarks`
- * flat with no separators, no collapsed-turn state, and the tooltip has no
- * `data-toggle-collapse` action. These tests pin the data contract the
- * implementation WILL ship, so they fail now for the right reason (missing
- * `data-turn-separator` / `data-toggle-collapse` / `data-collapsed-summary`)
- * and turn green once the grouping lands:
- *
- *   - fixture `userTurns: [1, 1, 2]` (3 users) yields exactly ONE separator,
- *     sitting between dot 2 and dot 3 (the turn 1→2 boundary), with
- *     `data-turn="2"` (the turn the boundary leads INTO).
+ * Contract pinned here:
+ *   - fixture `userTurns: [1, 1, 2]` (3 users) yields exactly ONE gap marker,
+ *     on dot 3 (the first dot of the turn-2 group), carrying `data-turn="2"`.
+ *   - NO `data-turn-separator` element exists anywhere anymore — the boundary
+ *     is a margin, not a line.
  *   - the tooltip on a turn-1 dot offers `data-toggle-collapse` (label
  *     折叠此轮, `aria-pressed=false`); clicking folds turn 1 to a single
  *     summary dot (`data-collapsed-summary="true"`,
  *     `data-collapsed-count="2"`) while the turn-2 dot stays; the toggle now
  *     reads 展开此轮 (`aria-pressed=true`) and clicking again restores all
- *     three dots.
+ *     three dots; the turn boundary gap is preserved on the summary → turn-2
+ *     boundary.
  *   - search totals are unaffected by collapse: the N/M counter keeps the
  *     full displayMarks count (3/3) while only 2 dots are rendered.
  *
@@ -143,9 +141,9 @@ function dots(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>('[data-rail-dot]')]
 }
 
-/** Every turn separator, in DOM order. */
-function separators(): HTMLElement[] {
-  return [...document.querySelectorAll<HTMLElement>('[data-turn-separator]')]
+/** Group-boundary markers: the FIRST dot of each new turn group. */
+function groupGaps(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>('[data-turn-gap]')]
 }
 
 /** The nth dot, by its accessible name (index 1 = the FIRST mark). */
@@ -174,22 +172,29 @@ function searchInput(): HTMLInputElement {
   return el
 }
 
-describe('MilestoneRail turn grouping (C4)', () => {
-  it('renders ONE separator at the turn 1→2 boundary, between dot 2 and dot 3, with data-turn="2"', () => {
+describe('MilestoneRail turn grouping (C4 / B-design)', () => {
+  it('renders ONE group gap on dot 3 (the turn 1→2 boundary) with data-turn="2", and NO separator element', () => {
     renderGroups({ users: USERS, userTurns: [1, 1, 2] })
 
     expect(dots()).toHaveLength(3)
-    expect(separators()).toHaveLength(1)
+    expect(groupGaps()).toHaveLength(1)
 
-    // DOM order inside the list: dot, dot, separator, dot — the separator
-    // sits exactly at the turn 1→2 boundary, before the third mark.
+    // The old separator LINE is gone — the boundary is spacing on the first
+    // dot of the new group.
+    expect(document.querySelector('[data-turn-separator]')).toBeNull()
+
+    // Inside the list there are only dots: dot, dot, dot — the THIRD is the
+    // group-opening dot carrying the gap marker and the incoming turn.
     const children = [...list().children]
+    expect(children).toHaveLength(3)
     expect(children[0]).toHaveAttribute('data-rail-dot')
+    expect(children[0]).not.toHaveAttribute('data-turn-gap')
     expect(children[1]).toHaveAttribute('data-rail-dot')
-    expect(children[2]).toHaveAttribute('data-turn-separator')
+    expect(children[1]).not.toHaveAttribute('data-turn-gap')
+    expect(children[2]).toHaveAttribute('data-rail-dot')
+    expect(children[2]).toHaveAttribute('data-turn-gap', 'true')
     expect(children[2]).toHaveAttribute('data-turn', '2')
-    expect(children[3]).toHaveAttribute('data-rail-dot')
-    expect(children[3]).toBe(dot(3))
+    expect(children[2]).toBe(dot(3))
   })
 
   it('the tooltip collapse action folds turn 1 to its last mark as a summary dot, and toggles back', () => {
@@ -211,9 +216,10 @@ describe('MilestoneRail turn grouping (C4)', () => {
     expect(summary).toHaveAttribute('data-collapsed-count', '2')
     expect(dot(3)).toBeInTheDocument()
     expect(dot(3)).not.toHaveAttribute('data-collapsed-summary')
-    // The turn boundary separator is still there (summary → turn 2).
-    expect(separators()).toHaveLength(1)
-    expect(separators()[0]).toHaveAttribute('data-turn', '2')
+    // The turn boundary gap is still there (summary → turn 2), on dot 3.
+    expect(groupGaps()).toHaveLength(1)
+    expect(groupGaps()[0]).toBe(dot(3))
+    expect(groupGaps()[0]).toHaveAttribute('data-turn', '2')
 
     // The tooltip now offers the expand action for the collapsed turn.
     fireEvent.mouseEnter(summary)
