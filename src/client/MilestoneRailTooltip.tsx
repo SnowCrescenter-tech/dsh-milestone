@@ -107,7 +107,7 @@ export function MilestoneRailTooltip({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, color: '#9aa4b8', fontSize: 13, lineHeight: 1.4, marginBottom: 4 }}>
-        <span>{t('pos.of', { n: hover.index + 1, m: hover.total })}</span>
+        <span>{hover.posLabel}</span>
         {hover.turnLabel !== null && <span>{hover.turnLabel}</span>}
         <button
           type="button"

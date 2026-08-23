@@ -54,7 +54,7 @@ import { deriveTurnMeta } from './tooltip-logic'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import { en, translateDict, zh, type MilestoneKey } from './locales.ts'
-import { buildRenderList, buildTurnGroups } from './turn-group-logic'
+import { buildDisplayTurns, buildRenderList, buildTurnGroups } from './turn-group-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { MilestoneListPanel } from './MilestoneListPanel.tsx'
 import { MilestoneTour } from './MilestoneTour.tsx'
@@ -432,6 +432,11 @@ export interface HoverInfo {
   readonly mark: MilestoneMark
   readonly index: number
   readonly total: number
+  /**
+   * Localized position line: `第 {n} / {m} 条` for a normal dot, `第 {a}–{b}
+   * / {m} 条` (the message RANGE) for a collapsed turn's summary dot.
+   */
+  readonly posLabel: string
   readonly turnLabel: string | null
   readonly durationLabel: string | null
   readonly reasonLabel: string | null
@@ -606,6 +611,13 @@ export function MilestoneRail({
   // P3: the expandable all-prompts list panel — when open, the list toggle
   // arms and the fixed panel (MilestoneListPanel) lists every mark.
   const [listOpen, setListOpen] = useState(false)
+  // P3 (0.6.6): while the list panel is open, the rail drains every older
+  // page so the panel enumerates the WHOLE session (not just the loaded
+  // window). `drainPage` marks one in-flight page fetch (drives the panel's
+  // loading hint together with the remaining-page intent); `drainFailed`
+  // stops the drain on a failed fetch and resets on the next open.
+  const [drainPage, setDrainPage] = useState(false)
+  const [drainFailed, setDrainFailed] = useState(false)
   // P3: the cross-session search panel — when open, the magnifier toggle arms
   // and the fixed panel (MilestoneSessionSearch) searches ALL sessions.
   const [crossOpen, setCrossOpen] = useState(false)
@@ -691,6 +703,13 @@ export function MilestoneRail({
     }
     return counts
   }, [displayMarks])
+
+  // P3 (0.6.6): display-round labels — raw harness turn numbers renumbered
+  // to a compact 1-based sequence over the marks (gaps from subagent turns
+  // and repeats from multi-mark turns collapse away). Labels only:
+  // grouping/collapse keep operating on the raw turn. Built over the FULL
+  // marks list so the numbering is stable under the bookmarks filter.
+  const displayTurns = useMemo(() => buildDisplayTurns(marks), [marks])
 
   // B-design personalization: the FULL toolbar prefs blob (hydrated once from
   // localStorage). Every toggle writes through to localStorage immediately, so
@@ -1053,6 +1072,26 @@ export function MilestoneRail({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [listOpen, crossOpen])
+
+  // P3 (0.6.6): drain every older page while the list panel is open, so the
+  // all-prompts list covers the WHOLE session — it is the "find anything"
+  // affordance and must not stop at the loaded window. One page per effect
+  // run: each fetch resolves into a fresh commit that re-reads `hasMore`, so
+  // the drain advances one page per render round-trip (no tight loop) and
+  // stops on the last page, a failed fetch (retried on the NEXT open), or
+  // the panel closing. Re-opening retries after a failure.
+  const listDraining = listOpen && (drainPage || (hasMore && !drainFailed))
+  useEffect(() => {
+    if (!listOpen) return
+    setDrainFailed(false)
+  }, [listOpen])
+  useEffect(() => {
+    if (!listOpen || !hasMore || drainPage || drainFailed) return
+    setDrainPage(true)
+    loadOlder()
+      .catch(() => setDrainFailed(true))
+      .finally(() => setDrainPage(false))
+  }, [listOpen, hasMore, drainPage, drainFailed, loadOlder])
 
   if (railBox === null || marks.length < MIN_MARKS) return null
 
@@ -1458,11 +1497,20 @@ export function MilestoneRail({
     // node(s), falling back to the trajectory request stream when no node
     // answers. All-null when the turn is absent or nothing is recorded.
     const meta = deriveTurnMeta(nodes, locations, mark.turn, trajectoryRequests)
+    // C4 (0.6.6): a collapsed turn's summary dot represents a RANGE of marks
+    // — its position line names the whole range (`第 a–b / m 条`) instead of
+    // only the last mark's slot.
+    const summaryCount = collapsedSummaries.get(mark.key)
     return {
       mark,
       index,
       total: displayMarks.length,
-      turnLabel: mark.turn !== undefined ? t('turn.label', { n: mark.turn }) : null,
+      posLabel:
+        summaryCount !== undefined
+          ? t('pos.range', { a: index - summaryCount + 2, b: index + 1, m: displayMarks.length })
+          : t('pos.of', { n: index + 1, m: displayMarks.length }),
+      turnLabel:
+        mark.turn !== undefined ? t('turn.label', { n: displayTurns.get(mark.turn) ?? mark.turn }) : null,
       durationLabel,
       reasonLabel,
       ttftLabel,
@@ -2447,6 +2495,12 @@ export function MilestoneRail({
           // bookmarks filters never narrow it.
           marks={marks}
           onJump={jump}
+          // Outside-pointerdown dismisses the panel (shared useOutsideDismiss
+          // contract; the toggle keeps its flip semantics via the exclusion).
+          onClose={() => setListOpen(false)}
+          // P3 (0.6.6): the rail drains older pages while the panel is open —
+          // the hint row shows while a drain run is in flight.
+          loading={listDraining}
           t={t}
         />
       )}
@@ -2603,6 +2657,37 @@ export function MilestoneRail({
                           : undefined,
                       }}
                     />
+                  )}
+                  {/* C4 (0.6.6): a collapsed turn's summary dot carries a
+                      visible ×N badge — without it the dot looks identical to
+                      a normal one and the hidden marks vanish silently. */}
+                  {summaryCount !== undefined && (
+                    <span
+                      data-collapsed-badge
+                      style={{
+                        position: 'absolute',
+                        top: -5,
+                        right: -7,
+                        minWidth: 15,
+                        height: 15,
+                        padding: '0 3px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: 8,
+                        background: 'rgba(20, 24, 32, 0.96)',
+                        border: `1px solid ${accentSoft}`,
+                        boxSizing: 'border-box',
+                        color: '#e6e8ee',
+                        fontSize: 9,
+                        lineHeight: 1,
+                        fontWeight: 600,
+                        whiteSpace: 'nowrap',
+                        pointerEvents: 'none',
+                      }}
+                    >
+                      ×{summaryCount}
+                    </span>
                   )}
                 </span>
               </button>

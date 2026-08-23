@@ -55,6 +55,16 @@ describe('interpolate / translateDict (language-override engine)', () => {
     expect(translateDict(en, 'search.label')).toBe('Search messages')
   })
 
+  it('pos.range renders the collapsed-summary message range', () => {
+    expect(translateDict(zh, 'pos.range', { a: 4, b: 6, m: 23 })).toBe('第 4–6 / 23 条')
+    expect(translateDict(en, 'pos.range', { a: 4, b: 6, m: 23 })).toBe('Messages 4–6 of 23')
+  })
+
+  it('list.loading renders the drain hint in both languages', () => {
+    expect(translateDict(zh, 'list.loading')).toBe('正在加载更早消息…')
+    expect(translateDict(en, 'list.loading')).toBe('Loading earlier messages…')
+  })
+
   it('translateDict passes unknown keys through unchanged (harness-seat degradation)', () => {
     expect(translateDict(zh, 'no.such.key')).toBe('no.such.key')
     expect(translateDict(en, 'no.such.key', { n: 1 })).toBe('no.such.key')

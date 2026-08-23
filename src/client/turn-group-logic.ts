@@ -35,6 +35,32 @@ export interface RenderItem {
 }
 
 /**
+ * Renumber the raw harness turn numbers into a compact 1-based DISPLAY
+ * sequence over the marks that actually render. The harness numbers every
+ * engine turn (subagent/injected turns included), so the raw numbers show
+ * gaps (turns that produced no user mark) and repeats (several marks sharing
+ * one turn); labels fed through this map read as clean 1, 2, 3, … rounds.
+ *
+ * Grouping and collapse logic keep operating on the RAW turn (same-turn marks
+ * are contiguous in rail order, so first-appearance ranking preserves the
+ * partition) — only labels consume this map.
+ *
+ * @param marks - marks in rail order (only `turn` is consulted).
+ * @returns raw turn -> display round (1-based), in first-appearance order;
+ *   turns that never appear (or marks without turn info) get no entry.
+ */
+export function buildDisplayTurns(marks: readonly GroupMark[]): ReadonlyMap<number, number> {
+  const display = new Map<number, number>()
+  let rank = 0
+  for (const mark of marks) {
+    if (mark.turn === undefined) continue
+    if (display.has(mark.turn)) continue
+    display.set(mark.turn, ++rank)
+  }
+  return display
+}
+
+/**
  * Partition consecutive marks by turn. Marks with the same numeric turn that
  * appear one after another share a group; each mark with `turn === undefined`
  * becomes its own singleton group with `turn: null`.

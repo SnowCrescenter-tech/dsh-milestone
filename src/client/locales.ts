@@ -19,6 +19,9 @@ export const zh = {
   'turn.label': '第 {n} 轮',
   /** Hover position: `第 {hover.index + 1} / {hover.total} 条`. */
   'pos.of': '第 {n} / {m} 条',
+  /** Hover position of a collapsed-turn summary dot: `第 {a}–{b} / {m} 条`
+   * (the range of messages the summary dot represents). */
+  'pos.range': '第 {a}–{b} / {m} 条',
   /** Search input placeholder. */
   'search.placeholder': '搜索消息内容',
   /** aria-label on the search toggle button and the search input. */
@@ -79,6 +82,8 @@ export const zh = {
   'list.close': '收起列表',
   /** Header title of the all-prompts list panel. */
   'list.label': '全部提问',
+  /** Bottom hint of the all-prompts list while it drains older pages. */
+  'list.loading': '正在加载更早消息…',
   /** Header title + input placeholder of the cross-session search panel. */
   'search.cross': '跨会话搜索',
   /** aria-label + title on the cross-session search toggle when the panel is CLOSED. */
@@ -260,6 +265,8 @@ export const en: Record<MilestoneKey, string> = {
   'window.hint': 'Showing {n} messages · more below',
   'turn.label': 'Turn {n}',
   'pos.of': 'Message {n} of {m}',
+  /** Collapsed-summary dot position: the message RANGE the dot represents. */
+  'pos.range': 'Messages {a}–{b} of {m}',
   'search.placeholder': 'Search message content',
   'search.label': 'Search messages',
   'bookmark.filter': 'Bookmarks only',
@@ -290,6 +297,8 @@ export const en: Record<MilestoneKey, string> = {
   'list.open': 'Open list',
   'list.close': 'Close list',
   'list.label': 'All prompts',
+  /** Bottom hint of the all-prompts list while it drains older pages. */
+  'list.loading': 'Loading earlier messages…',
   'search.cross': 'Cross-session search',
   'search.cross.open': 'Open cross-session search',
   'search.cross.close': 'Close cross-session search',

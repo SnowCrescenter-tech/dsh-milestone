@@ -3,27 +3,34 @@
  * (P3): the rail-top list toggle opens a fixed panel listing EVERY user-prompt
  * milestone (序号 + turn + preview), and clicking an entry jumps to that
  * message through the SAME `jump` path the rail dots use (scrollIntoView on
- * the `[data-chat-anchor-key]` row). Escape or re-clicking the toggle closes
- * the panel; the sibling toggles (bookmarks / focus / search) stay intact.
+ * the `[data-chat-anchor-key]` row). Escape, re-clicking the toggle, or a
+ * pointerdown OUTSIDE the panel closes it (the rail feeds a real onClose to
+ * the shared useOutsideDismiss contract); the sibling toggles (bookmarks /
+ * focus / search) stay intact.
  *
- * Outside dismissal: pinned at the PANEL level (rendering MilestoneListPanel
- * directly with an onClose mock), because MilestoneRail.tsx does not pass
- * onClose to this panel yet — its owner is wiring that call site separately.
- * The hook contract (outside pointerdown → onClose; inside → no-op) is
- * exercised here; once the rail feeds a real onClose, the panel-level wiring
- * already in place activates end-to-end.
+ * P3 (0.6.6): opening the list drains EVERY older page (loadOlder until
+ * hasMore is false) so the panel covers the whole session — pinned by a live
+ * snapshot harness (renderLiveRail) that re-renders the rail after each page
+ * fetch, mirroring the harness uSES subscription.
  *
  * DOM contract pinned here:
  *   - `[data-list-toggle]`            the toggle button (aria-pressed).
  *   - `[data-milestone-list]`         the panel root.
  *   - `[data-list-item]`              one row per mark (data-jump-key).
+ *   - `[data-list-loading]`           the drain loading hint row.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render as renderUi, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render as renderUi, screen, waitFor } from '@testing-library/react'
+import { useMemo, useRef, useState } from 'react'
 import { MilestoneListPanel } from './MilestoneListPanel.tsx'
 import { zh } from './locales.ts'
 import { renderRail as renderRailImpl } from '../test/renderRail.tsx'
 import type { RailUser } from '../test/renderRail.tsx'
+import { MilestoneRail } from './MilestoneRail.tsx'
+import type { MilestoneRailProps } from './MilestoneRail.tsx'
+import { createBookmarksStore } from './bookmarkStore.ts'
+import { buildSnapshot } from '../test/snapshot-fixture.ts'
+import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
 
 afterEach(() => {
   cleanup()
@@ -35,6 +42,26 @@ function makeT(dict: Record<string, string>) {
   return (key: string, params?: Record<string, unknown>) => {
     const tpl = dict[key] ?? key
     return params ? tpl.replace(/\{(\w+)\}/g, (slot, name) => (name in params ? String(params[name]) : slot)) : tpl
+  }
+}
+
+/** Full Storage surface (getItem/setItem/removeItem/clear/key/length) over a Map. */
+function createStorage(backing: Map<string, string>): Storage {
+  return {
+    get length() {
+      return backing.size
+    },
+    clear: () => {
+      backing.clear()
+    },
+    getItem: (k: string) => backing.get(k) ?? null,
+    key: (index: number) => [...backing.keys()][index] ?? null,
+    removeItem: (k: string) => {
+      backing.delete(k)
+    },
+    setItem: (k: string, v: string) => {
+      backing.set(k, v)
+    },
   }
 }
 
@@ -86,6 +113,78 @@ function renderPanel(onClose = () => {}) {
       t={makeT(zh as Record<string, string>)}
     />,
   )
+}
+
+/**
+ * LIVE snapshot harness for the list-drain contract: the snapshot lives in
+ * React state and `loadOlder` appends one OLDER page (older pages first) then
+ * flips `hasMore`, re-rendering the rail — mirroring the harness uSES
+ * subscription the drain effect depends on. `loadOlder` is stable (useMemo),
+ * so the drain effect never restarts mid-flight.
+ */
+function renderLiveRail(users: RailUser[], olderPages: RailUser[][]) {
+  const olderAll = olderPages.flat()
+  const backing = new Map<string, string>()
+  vi.stubGlobal('localStorage', createStorage(backing))
+  const store = createBookmarksStore().create('fixture')
+  // Observable fetch counter — tests assert the drain stops after close.
+  const calls = { count: 0 }
+
+  function Live() {
+    const [snap, setSnap] = useState(() => buildSnapshot({ users, hasMore: olderPages.length > 0 }))
+    const remainingRef = useRef(olderPages.length)
+    // The loaded window accumulates: each page PREPENDS to the already
+    // loaded users (a real loadOlder keeps older history in the snapshot).
+    const loadedRef = useRef({ users })
+    const loadOlder = useMemo(
+      () => async () => {
+        const remaining = remainingRef.current
+        if (remaining <= 0) return
+        calls.count += 1
+        remainingRef.current = remaining - 1
+        const page = olderPages[olderPages.length - remaining]
+        loadedRef.current = { users: [...page, ...loadedRef.current.users] }
+        setSnap(buildSnapshot({ users: loadedRef.current.users, hasMore: remaining - 1 > 0 }))
+      },
+      [users, olderPages],
+    )
+    const useSession: (selector: (s: ConversationSnapshotFixture) => unknown) => unknown = (selector) =>
+      selector(snap)
+    const props = {
+      useSession,
+      sessionId: 'fixture',
+      useProjection: () => undefined,
+      loadOlder,
+      useStore: (selector: (snap: { keys: string[] }) => unknown) => selector(store.getSnapshot()),
+      actions: store.actions,
+      t: makeT(zh as Record<string, string>),
+      forkAt: vi.fn(async () => 'child-id'),
+      searchSessions: vi.fn(async () => ({ items: [], hasMore: false })),
+      openSession: vi.fn(),
+    } as unknown as MilestoneRailProps
+    return (
+      <div data-conversation-scroll>
+        <div style={{ height: 400 }}>
+          {olderAll.concat(users).map((user) => (
+            <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+              {user.text}
+            </div>
+          ))}
+        </div>
+        <MilestoneRail {...props} />
+      </div>
+    )
+  }
+
+  return { ...renderUi(<Live />), calls }
+}
+
+/** One older page: 2 marks that predate the initially loaded window. */
+function olderPage(prefix: string, base: number): RailUser[] {
+  return [
+    { key: `13:user<${prefix}-1>`, seq: base, time: 1_700_000_000_000 + base, text: `${prefix}第一个问题` },
+    { key: `13:user<${prefix}-2>`, seq: base + 1, time: 1_700_000_060_000 + base, text: `${prefix}第二个问题` },
+  ]
 }
 
 describe('MilestoneRail milestone list panel (P3)', () => {
@@ -199,5 +298,67 @@ describe('MilestoneRail milestone list panel (P3)', () => {
 
     expect(onClose).not.toHaveBeenCalled()
     expect(panel()).not.toBeNull()
+  })
+
+  it('a pointerdown OUTSIDE the open panel closes it through the rail-wired onClose', () => {
+    render()
+    expandToolbar()
+    fireEvent.click(toggle())
+    expect(panel()).not.toBeNull()
+
+    fireEvent.pointerDown(document.body)
+
+    expect(panel()).toBeNull()
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('opening the list drains every older page so the panel covers the whole session', async () => {
+    // 2 current marks + 2 older pages (2 marks each) = 6 rows once drained.
+    const current = [
+      { key: '13:user<cur-1>', seq: 5, time: 1_700_000_000_000 + 5, text: '当前第一个问题' },
+      { key: '13:user<cur-2>', seq: 6, time: 1_700_000_060_000 + 6, text: '当前第二个问题' },
+    ]
+    const older = [olderPage('老一页', 3), olderPage('老二页', 1)]
+    const { calls } = renderLiveRail(current, older)
+    expandToolbar()
+
+    // Before opening, the list is closed — no drain has run.
+    expect(calls.count).toBe(0)
+    fireEvent.click(toggle())
+    expect(panel()).not.toBeNull()
+    // The panel starts from the loaded window (≥ the 2 current marks); the
+    // first page may already land in the same act batch, so only the drain's
+    // END state is pinned exactly.
+
+    // The drain fetches one page per commit until hasMore is false: the panel
+    // grows to all 6 marks, oldest first, and the loading hint disappears.
+    await waitFor(() => expect(items()).toHaveLength(6))
+    expect(calls.count).toBe(2)
+    expect(items().at(0)?.textContent).toContain('老二页第一个问题')
+    expect(items().at(4)?.textContent).toContain('当前第一个问题')
+    await waitFor(() => expect(document.querySelector('[data-list-loading]')).toBeNull())
+  })
+
+  it('closing the panel mid-drain stops further page fetches', async () => {
+    const current = [
+      { key: '13:user<cur-1>', seq: 5, time: 1_700_000_000_000 + 5, text: '当前第一个问题' },
+      { key: '13:user<cur-2>', seq: 6, time: 1_700_000_060_000 + 6, text: '当前第二个问题' },
+    ]
+    const older = [olderPage('老一页', 3), olderPage('老二页', 1), olderPage('老三页', 0)]
+    const { calls } = renderLiveRail(current, older)
+    expandToolbar()
+    fireEvent.click(toggle())
+
+    // The first page lands; close the panel before the rest arrive.
+    await waitFor(() => expect(calls.count).toBeGreaterThanOrEqual(1))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(panel()).toBeNull()
+
+    // Any page already in flight when the panel closed may still land; after
+    // it does, NO further fetches may start (the drain is dead).
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const settled = calls.count
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(calls.count).toBe(settled)
   })
 })

@@ -216,6 +216,11 @@ describe('MilestoneRail turn grouping (C4 / B-design)', () => {
     expect(summary).toHaveAttribute('data-collapsed-count', '2')
     expect(dot(3)).toBeInTheDocument()
     expect(dot(3)).not.toHaveAttribute('data-collapsed-summary')
+    // The summary dot wears a VISIBLE ×N badge so the hidden marks never
+    // vanish silently (the count is rendered, not just a data attribute).
+    const badge = summary.querySelector('[data-collapsed-badge]')
+    expect(badge).not.toBeNull()
+    expect(badge?.textContent).toBe('×2')
     // The turn boundary gap is still there (summary → turn 2), on dot 3.
     expect(groupGaps()).toHaveLength(1)
     expect(groupGaps()[0]).toBe(dot(3))
