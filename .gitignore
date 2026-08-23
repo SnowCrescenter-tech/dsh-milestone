@@ -23,3 +23,7 @@ Thumbs.db
 
 # logs
 *.log
+
+# playwright surface QA artifacts
+test-results/
+playwright-report/
