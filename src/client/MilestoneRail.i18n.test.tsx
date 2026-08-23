@@ -6,7 +6,7 @@
  * prove the byte-match; this file pins the two ends of the seam).
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, screen } from '@testing-library/react'
+import { cleanup, fireEvent, screen } from '@testing-library/react'
 import { renderRail } from '../test/renderRail.tsx'
 import type { RailUser } from '../test/renderRail.tsx'
 import { en } from './locales.ts'
@@ -27,6 +27,13 @@ function makeT(dict: Record<string, string>) {
 /** The dot list's aria-label (`data-rail-list`). */
 function railListLabel(): string | null {
   return document.querySelector('[data-rail-list]')?.getAttribute('aria-label') ?? null
+}
+
+/** B1: the toolbar defaults COLLAPSED — expand it to reveal the search/bookmark toggles. */
+function expandToolbar() {
+  const btn = document.querySelector<HTMLElement>('[data-toolbar-expand]')
+  if (btn === null) throw new Error('data-toolbar-expand not found')
+  fireEvent.click(btn)
 }
 
 afterEach(() => {
@@ -51,6 +58,7 @@ describe('MilestoneRail locale threading (C1)', () => {
 
   it('with an en `t`: the search toggle and bookmark filter resolve to English', () => {
     renderRail(USERS, { t: makeT(en as Record<string, string>) })
+    expandToolbar()
 
     expect(screen.getByRole('button', { name: 'Search messages' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Bookmarks only' })).toBeInTheDocument()

@@ -1,7 +1,9 @@
 /**
  * Component tests for the milestone rail's in-rail search (F1):
  * toggle, full-text matching beyond the 80-char preview, dimming of
- * non-matches, Enter navigation with wrap-around, and Escape reset.
+ * non-matches, Enter navigation with wrap-around, Escape reset, and
+ * outside-pointer dismissal (a pointerdown outside the open panel closes it;
+ * one inside keeps it open).
  *
  * The fixture message whose text exceeds 80 chars proves the search runs over
  * the FULL message text (`text`, from `rail-logic.extractText`) — a token
@@ -38,6 +40,13 @@ function render(users: RailUser[] = USERS) {
   return renderRailImpl(users)
 }
 
+/** B1: the toolbar defaults COLLAPSED — expand it to reveal the search toggle. */
+function expandToolbar() {
+  const btn = document.querySelector<HTMLElement>('[data-toolbar-expand]')
+  if (btn === null) throw new Error('data-toolbar-expand not found')
+  fireEvent.click(btn)
+}
+
 function toggle() {
   return screen.getByRole('button', { name: '搜索消息' })
 }
@@ -61,6 +70,7 @@ function searchInput(): HTMLInputElement {
 describe('MilestoneRail search (F1)', () => {
   it('the rail shows a search toggle; clicking it reveals input and match counter', () => {
     render()
+    expandToolbar()
 
     expect(toggle()).toBeInTheDocument()
     expect(document.querySelector('[data-rail-search]')).toBeNull()
@@ -77,6 +87,7 @@ describe('MilestoneRail search (F1)', () => {
     expect(tailIndex).toBeGreaterThan(80)
 
     render()
+    expandToolbar()
     fireEvent.click(toggle())
     fireEvent.change(searchInput(), { target: { value: TOKEN } })
 
@@ -91,6 +102,7 @@ describe('MilestoneRail search (F1)', () => {
     const spy = vi.spyOn(Element.prototype, 'scrollIntoView')
 
     render(USERS_ALPHA)
+    expandToolbar()
     fireEvent.click(toggle())
     fireEvent.change(searchInput(), { target: { value: 'alpha' } })
 
@@ -114,6 +126,7 @@ describe('MilestoneRail search (F1)', () => {
 
   it('Escape clears the query, closes the panel, and restores every dot', () => {
     render()
+    expandToolbar()
     fireEvent.click(toggle())
     fireEvent.change(searchInput(), { target: { value: TOKEN } })
     expect(dot(1)).toHaveAttribute('data-dimmed')
@@ -129,5 +142,25 @@ describe('MilestoneRail search (F1)', () => {
     fireEvent.click(toggle())
     expect(searchInput().value).toBe('')
     expect(matchCount().textContent).toBe('3/3')
+  })
+
+  it('a pointerdown outside the panel closes it', () => {
+    render()
+    expandToolbar()
+    fireEvent.click(toggle())
+    expect(document.querySelector('[data-rail-search]')).not.toBeNull()
+
+    fireEvent.pointerDown(document.body)
+
+    expect(document.querySelector('[data-rail-search]')).toBeNull()
+  })
+
+  it('a pointerdown inside the panel keeps it open', () => {
+    render()
+    expandToolbar()
+    fireEvent.click(toggle())
+    fireEvent.pointerDown(searchInput())
+
+    expect(document.querySelector('[data-rail-search]')).not.toBeNull()
   })
 })

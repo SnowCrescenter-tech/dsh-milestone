@@ -13,10 +13,16 @@
  * (`data-session-search` root / `data-session-search-input` /
  * `data-session-search-result` rows / `data-session-search-error` /
  * `data-session-search-more`).
+ *
+ * Outside dismissal: while the panel is mounted (it only renders while open),
+ * a pointerdown anywhere outside it calls the rail-fed `onClose` (shared
+ * useOutsideDismiss hook; the toggle's own click keeps its flip semantics
+ * through a `[data-session-search-toggle]` exclusion).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
 import type { SessionSearchResultItemLike } from './railInject.ts'
 
 /** Debounce window for the cross-session query (ms). */
@@ -64,6 +70,12 @@ export function MilestoneSessionSearch({
   const [status, setStatus] = useState<SearchStatus>('idle')
   const [hits, setHits] = useState<readonly SessionSearchHit[]>([])
   const [hasMore, setHasMore] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // The panel is only mounted while open, so `open` is a constant true;
+  // closing = unmount, which runs the hook's cleanup.
+  useOutsideDismiss(panelRef, true, onClose, {
+    exclude: (target) => outsideDismissMatches(target, '[data-session-search-toggle]'),
+  })
 
   // Debounced search: every query change cancels the pending timer AND the
   // in-flight RPC (the signal is passed through, so a superseded search is
@@ -103,6 +115,7 @@ export function MilestoneSessionSearch({
 
   return (
     <div
+      ref={panelRef}
       data-session-search
       style={{
         position: 'fixed',

@@ -3,7 +3,9 @@
  * rail-top toggle opens a fixed panel whose debounced input searches EVERY
  * session through the injected `searchSessions` action; result rows show
  * title + snippet, clicking one opens that session (`openSession`) and closes
- * the panel; failures surface the `search.error` locale text.
+ * the panel; failures surface the `search.error` locale text. Outside-pointer
+ * dismissal is pinned too: a pointerdown outside the open panel closes it,
+ * one inside keeps it open.
  *
  * DOM contract pinned here:
  *   - `[data-session-search-toggle]`   the toggle button (aria-pressed).
@@ -39,6 +41,13 @@ function render(opts?: { searchSessions?: SearchOverride; openSession?: (id: str
   })
 }
 
+/** B1: the toolbar defaults COLLAPSED — expand it to reveal the search toggle. */
+function expandToolbar() {
+  const btn = document.querySelector<HTMLElement>('[data-toolbar-expand]')
+  if (btn === null) throw new Error('data-toolbar-expand not found')
+  fireEvent.click(btn)
+}
+
 function toggle(): HTMLElement {
   return screen.getByRole('button', { name: '打开跨会话搜索' })
 }
@@ -62,6 +71,7 @@ describe('MilestoneRail cross-session search (P3)', () => {
 
   it('renders the cross-session toggle armed off with the open label', () => {
     render()
+    expandToolbar()
 
     const btn = toggle()
     expect(btn).toHaveAttribute('data-session-search-toggle')
@@ -73,6 +83,7 @@ describe('MilestoneRail cross-session search (P3)', () => {
 
   it('clicking the toggle opens the panel with a focused input', () => {
     render()
+    expandToolbar()
 
     fireEvent.click(toggle())
 
@@ -88,6 +99,7 @@ describe('MilestoneRail cross-session search (P3)', () => {
   it('typing debounces the search and calls searchSessions with the trimmed query and an AbortSignal', async () => {
     const searchSessions = vi.fn(async () => ({ items: [], hasMore: false }))
     render({ searchSessions })
+    expandToolbar()
 
     fireEvent.click(toggle())
     fireEvent.change(input(), { target: { value: '  rust  ' } })
@@ -116,6 +128,7 @@ describe('MilestoneRail cross-session search (P3)', () => {
       return { items: [], hasMore: false }
     })
     render({ searchSessions })
+    expandToolbar()
 
     fireEvent.click(toggle())
     fireEvent.change(input(), { target: { value: 'ru' } })
@@ -147,6 +160,7 @@ describe('MilestoneRail cross-session search (P3)', () => {
       hasMore: true,
     }))
     render({ searchSessions, openSession })
+    expandToolbar()
 
     fireEvent.click(toggle())
     fireEvent.change(input(), { target: { value: 'rust' } })
@@ -177,6 +191,7 @@ describe('MilestoneRail cross-session search (P3)', () => {
       throw new Error('boom')
     })
     render({ searchSessions })
+    expandToolbar()
 
     fireEvent.click(toggle())
     fireEvent.change(input(), { target: { value: 'rust' } })
@@ -190,6 +205,7 @@ describe('MilestoneRail cross-session search (P3)', () => {
 
   it('Escape closes the panel', () => {
     render()
+    expandToolbar()
 
     fireEvent.click(toggle())
     expect(panel()).not.toBeNull()
@@ -199,8 +215,32 @@ describe('MilestoneRail cross-session search (P3)', () => {
     expect(toggle()).toHaveAttribute('aria-pressed', 'false')
   })
 
+  it('a pointerdown outside the panel closes it', () => {
+    render()
+    expandToolbar()
+
+    fireEvent.click(toggle())
+    expect(panel()).not.toBeNull()
+
+    fireEvent.pointerDown(document.body)
+
+    expect(panel()).toBeNull()
+    expect(toggle()).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('a pointerdown inside the panel keeps it open', () => {
+    render()
+    expandToolbar()
+
+    fireEvent.click(toggle())
+    fireEvent.pointerDown(input())
+
+    expect(panel()).not.toBeNull()
+  })
+
   it('the bookmarks / focus / list toggles remain intact alongside the search toggle', () => {
     render()
+    expandToolbar()
 
     const bookmarks = screen.getByRole('button', { name: '只看收藏' })
     const focus = screen.getByRole('button', { name: '聚焦模式' })

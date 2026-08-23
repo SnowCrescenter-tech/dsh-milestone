@@ -32,7 +32,7 @@
  * messages the current window covers.
  */
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
+import type { FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, PropsStore } from '@deepseek-ai/dsh-client-ui-slots'
 import { badgeRingStyle, deriveBadge } from './badge-logic'
 import type { createBookmarksStore } from './bookmarkStore.ts'
@@ -51,6 +51,11 @@ import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { MilestoneSessionSearch } from './MilestoneSessionSearch.tsx'
 import type { SearchSessionsFn } from './MilestoneSessionSearch.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
+import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
+import { loadPrefs, savePrefs, togglePin } from './toolbar-prefs.ts'
+import type { ToolbarPinId } from './toolbar-prefs.ts'
+import { loadCachedLatest, needsUpdate, SUPPORTED_HOST_LINES } from './version-logic.ts'
+import { PLUGIN_NPM_URL, PLUGIN_REPO_URL, PLUGIN_VERSION } from './version-meta.ts'
 
 /**
  * F3 inject face: the rail entry registers an `inject` factory (index.ts)
@@ -122,6 +127,9 @@ const DEEP_LINK_POLL_DELAY = 150
 const DEEP_LINK_MAX_POLLS = 5
 /** P3: bounded polls after `loadOlder`, then the deep link gives up silently. */
 const DEEP_LINK_MAX_RETRY_POLLS = 5
+/** B4 update-check: mount-time silent check delay (ms) — give the harness
+ * time to settle before hitting the registry. */
+const UPDATE_CHECK_MOUNT_DELAY = 1500
 
 /** One user message: its node key (DOM anchor), turn, and payload bits. */
 interface MilestoneMark {
@@ -141,6 +149,57 @@ interface SearchState {
   /** Position within the CURRENT match list (not a mark index). */
   readonly activePos: number
   readonly panelOpen: boolean
+}
+
+/**
+ * One entry of the collapsible toolbar's data-driven feature registry (the
+ * "top function-key area"): the persisted pin id, the settings-menu display
+ * label key, and the rail-top JSX (the toggle button, and for `search` the
+ * whole RailSearchUi chrome). Pinning is purely id-driven — a feature renders
+ * while the toolbar is EXPANDED or while its id is in the persisted `pinned`
+ * set — so adding a feature is a registry-only change (plus its locale keys).
+ *
+ * EXTENSION POINT (integration): to add a future function key (e.g. the B4
+ * update-check button), push an entry with a new `id` to `toolbarFeatures`
+ * below — pinning/persistence/settings-menu listing then work automatically.
+ * The `id` whitelist lives in toolbar-prefs.ts (`TOOLBAR_PIN_IDS`), which
+ * types every id here as `ToolbarPinId`, so a new id MUST be added there too
+ * (one line) for its pin toggle to survive the read-time sanitizer.
+ */
+interface ToolbarFeatureDef {
+  readonly id: ToolbarPinId
+  /** Settings-menu display name (resolved through `t`). */
+  readonly labelKey: MilestoneKey
+  /** Renders the feature's rail-top chrome (button, or RailSearchUi for search). */
+  readonly render: () => ReactNode
+}
+
+/**
+ * B4 update-check state: the result of the last check (auto on mount, manual,
+ * or retry) plus the in-flight phase. `available` is the needsUpdate verdict
+ * computed at check-completion time — never recomputed during render, so a
+ * registry anomaly (unparseable `latest`) degrades to "not available" instead
+ * of throwing mid-render.
+ */
+interface UpdateCheckState {
+  readonly phase: 'idle' | 'checking' | 'ok' | 'failed'
+  readonly latest: string | null
+  readonly source: 'npmmirror' | 'npm' | null
+  readonly error: string | null
+  readonly available: boolean
+}
+
+/** Initial state: no check has completed yet, nothing to show. */
+const NO_UPDATE_CHECK: UpdateCheckState = { phase: 'idle', latest: null, source: null, error: null, available: false }
+
+/**
+ * B4 display label for one supported host line: strips the fixed
+ * `x.y.z` prefix and appends "line" — `0.1.1-rc.2` → `rc.2 line`,
+ * `0.1.1` → `0.1.1 line`. Pure presentation metadata.
+ */
+function hostLineLabel(line: string): string {
+  const suffix = line.replace(/^\d+\.\d+\.\d+-?/, '')
+  return suffix === '' ? `${line} line` : `${suffix} line`
 }
 
 interface RailBox {
@@ -460,6 +519,116 @@ export function MilestoneRail({
     return () => window.removeEventListener('keydown', onKey)
   }, [listOpen, crossOpen])
 
+  // B1 collapsible toolbar: the function-key area folds to an expand arrow +
+  // settings gear; only the user's pinned features stay visible while folded.
+  // `pinned` is hydrated ONCE from localStorage (sanitized by toolbar-prefs)
+  // and every toggle write-throughs — the render state and the persisted blob
+  // never diverge.
+  const [toolbarExpanded, setToolbarExpanded] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [pinned, setPinned] = useState<ToolbarPinId[]>(() => loadPrefs())
+  const settingsRef = useRef<HTMLDivElement>(null)
+  const settingsBtnRef = useRef<HTMLButtonElement>(null)
+
+  // B4 update-check: the popover open flag, the last/current check result
+  // (auto on mount, manual, or retry), and the floating panel's refs.
+  const [updateOpen, setUpdateOpen] = useState(false)
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckState>(NO_UPDATE_CHECK)
+  const updatePanelRef = useRef<HTMLDivElement>(null)
+  const updateBtnRef = useRef<HTMLButtonElement>(null)
+
+  /**
+   * B1 settings menu: outside-pointerdown dismisses the menu (shared
+   * useOutsideDismiss contract) with focus returning to the gear afterwards.
+   * The gear's own click keeps its flip semantics through a
+   * `[data-toolbar-settings]` exclusion — pointerdown on an armed gear must
+   * not double-close.
+   */
+  useOutsideDismiss(
+    settingsRef,
+    settingsOpen,
+    () => {
+      setSettingsOpen(false)
+      settingsBtnRef.current?.focus()
+    },
+    { exclude: (target) => outsideDismissMatches(target, '[data-toolbar-settings]') },
+  )
+
+  // B1: Escape closes the settings menu (its own keystroke owner, mirroring
+  // the list/cross panels) and returns focus to the gear.
+  useEffect(() => {
+    if (!settingsOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setSettingsOpen(false)
+      settingsBtnRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [settingsOpen])
+
+  /**
+   * B4: run one update check. Cache-aware (`loadCachedLatest` reuses an
+   * unexpired cached result without any network traffic) and never throws:
+   * a network failure lands in the `failed` phase with the structured error,
+   * and an unparseable `latest` (registry anomaly) is treated as "not
+   * available" rather than crashing the panel.
+   */
+  const runUpdateCheck = (): void => {
+    setUpdateCheck((prev) => ({ ...prev, phase: 'checking' }))
+    void loadCachedLatest().then((result) => {
+      if (result.ok) {
+        let available = false
+        try {
+          available = needsUpdate(PLUGIN_VERSION, result.latest)
+        } catch {
+          available = false
+        }
+        setUpdateCheck({ phase: 'ok', latest: result.latest, source: result.source, error: null, available })
+      } else {
+        setUpdateCheck((prev) => ({ ...prev, phase: 'failed', error: result.error }))
+      }
+    })
+  }
+
+  // B4: one SILENT mount-time check, delayed ~1.5s so the harness settles
+  // before the registry is hit. Runs whenever the rail mounts (independent of
+  // toolbar visibility — the badge must work for a pinned button too) and is
+  // cancelled on unmount, so a stale timer never fires into a dead component.
+  useEffect(() => {
+    const timer = window.setTimeout(runUpdateCheck, UPDATE_CHECK_MOUNT_DELAY)
+    return () => window.clearTimeout(timer)
+    // runUpdateCheck closes over only module constants + stable state
+    // setters, so the first-render instance is safe to capture once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // B4: outside-pointerdown dismisses the update popover (shared
+  // useOutsideDismiss contract) with focus returning to the toggle; the
+  // button's own click keeps its flip semantics via the `[data-update-check]`
+  // exclusion — same pattern as the settings gear.
+  useOutsideDismiss(
+    updatePanelRef,
+    updateOpen,
+    () => {
+      setUpdateOpen(false)
+      updateBtnRef.current?.focus()
+    },
+    { exclude: (target) => outsideDismissMatches(target, '[data-update-check]') },
+  )
+
+  // B4: Escape closes the update popover and returns focus to its toggle.
+  useEffect(() => {
+    if (!updateOpen) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return
+      setUpdateOpen(false)
+      updateBtnRef.current?.focus()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [updateOpen])
+
   // P3 deep links: a `#msg=<mark key>` URL hash restores the conversation
   // position on load (and `jump` writes it back, so refresh/share preserve
   // it). The retry cycle is bounded — poll up to DEEP_LINK_MAX_POLLS × 150ms
@@ -553,6 +722,293 @@ export function MilestoneRail({
     if (e.key === 'Enter') advanceMatch()
     if (e.key === 'Escape') closeSearch()
   }
+
+  /** B1: flip one feature's pin — state and the persisted blob update together. */
+  const onTogglePin = (id: ToolbarPinId): void => {
+    setPinned((prev) => {
+      const next = togglePin(prev, id)
+      savePrefs(next)
+      return next
+    })
+  }
+
+  /** B1: reset every pin (everything folds away) and persist the empty set. */
+  const onResetPins = (): void => {
+    setPinned([])
+    savePrefs([])
+  }
+
+  /** B1: a feature renders while the toolbar is EXPANDED or while it is pinned. */
+  const featureVisible = (id: ToolbarPinId): boolean => toolbarExpanded || pinned.includes(id)
+
+  /**
+   * B1: the data-driven feature registry. Each entry's render is the feature's
+   * UNCHANGED rail-top chrome (data attributes / aria semantics preserved),
+   * moved verbatim from the previous static button block; `search` is the
+   * whole RailSearchUi (toggle + panel) so its lifecycle stays component-local
+   * in the rail (search state lives in the rail and survives unmount).
+   * Registry order = settings-menu order (站内搜索/全部提问/跨会话搜索/只看收藏/聚焦模式).
+   *
+   * EXTENSION POINT: push a new feature here (+ its id in toolbar-prefs.ts's
+   * TOOLBAR_PIN_IDS and its locale keys) and pinning/settings/expand all
+   * follow automatically — see the ToolbarFeatureDef doc above.
+   */
+  const toolbarFeatures: readonly ToolbarFeatureDef[] = [
+    {
+      id: 'search',
+      labelKey: 'search.label',
+      render: () => (
+        <RailSearchUi
+          panelTop={railBox.top}
+          panelRight={railBox.right + DOT_HIT + 8}
+          query={search.query}
+          panelOpen={search.panelOpen}
+          matches={matches.length}
+          total={displayMarks.length}
+          onToggle={() => setSearch((s) => ({ ...s, panelOpen: !s.panelOpen }))}
+          onQueryChange={updateQuery}
+          onSearchKeyDown={onSearchKeyDown}
+          onClear={clearSearch}
+          t={t}
+        />
+      ),
+    },
+    {
+      id: 'list',
+      labelKey: 'list.label',
+      render: () => (
+        <button
+          type="button"
+          data-list-toggle
+          aria-label={listOpen ? t('list.close') : t('list.open')}
+          title={listOpen ? t('list.close') : t('list.open')}
+          aria-pressed={listOpen}
+          onClick={() => setListOpen((v) => !v)}
+          style={{
+            width: DOT_HIT,
+            height: DOT_HIT,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: listOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            color: listOpen ? '#9db8ff' : '#8b96ab',
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <path d="M3 6h18" />
+            <path d="M3 12h18" />
+            <path d="M3 18h18" />
+          </svg>
+        </button>
+      ),
+    },
+    {
+      id: 'sessionSearch',
+      labelKey: 'search.cross',
+      render: () => (
+        <button
+          type="button"
+          data-session-search-toggle
+          aria-label={crossOpen ? t('search.cross.close') : t('search.cross.open')}
+          title={crossOpen ? t('search.cross.close') : t('search.cross.open')}
+          aria-pressed={crossOpen}
+          onClick={() => setCrossOpen((v) => !v)}
+          style={{
+            width: DOT_HIT,
+            height: DOT_HIT,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: crossOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            color: crossOpen ? '#9db8ff' : '#8b96ab',
+          }}
+        >
+          {/* A list of rows with a magnifier overlaid — cross-session search. */}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 6h9" />
+            <path d="M3 12h9" />
+            <path d="M3 18h9" />
+            <circle cx="17" cy="7" r="3.5" />
+            <path d="m19.5 9.5 2.5 2.5" />
+          </svg>
+        </button>
+      ),
+    },
+    {
+      id: 'bookmarks',
+      labelKey: 'bookmark.filter',
+      render: () => (
+        <button
+          type="button"
+          data-bookmarks-toggle
+          aria-label={t('bookmark.filter')}
+          aria-pressed={bookmarksOnly}
+          data-active={bookmarksOnly ? 'true' : undefined}
+          onClick={() => setBookmarksOnly((v) => !v)}
+          style={{
+            width: DOT_HIT,
+            height: DOT_HIT,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: bookmarksOnly ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            color: bookmarksOnly ? '#9db8ff' : '#8b96ab',
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill={bookmarksOnly ? 'currentColor' : 'none'}
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+          </svg>
+        </button>
+      ),
+    },
+    {
+      id: 'focus',
+      labelKey: 'focus.on',
+      render: () => (
+        <button
+          type="button"
+          data-focus-toggle
+          aria-label={focusActive ? t('focus.off') : t('focus.on')}
+          title={focusActive ? t('focus.off') : t('focus.on')}
+          aria-pressed={focusActive}
+          onClick={() => setFocusActive((v) => !v)}
+          style={{
+            width: DOT_HIT,
+            height: DOT_HIT,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: focusActive ? 'rgba(126, 226, 168, 0.14)' : 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            color: focusActive ? '#7ee2a8' : '#8b96ab',
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      ),
+    },
+    {
+      id: 'updateCheck',
+      labelKey: 'update.check',
+      render: () => (
+        <button
+          type="button"
+          ref={updateBtnRef}
+          data-update-check
+          aria-expanded={updateOpen}
+          aria-label={t('update.check')}
+          title={t('update.check')}
+          onClick={() => setUpdateOpen((v) => !v)}
+          style={{
+            position: 'relative',
+            width: DOT_HIT,
+            height: DOT_HIT,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            // A pending update tints the button amber so the rail reads the
+            // availability before the popover is ever opened.
+            background: updateOpen || updateCheck.available ? 'rgba(245, 197, 66, 0.14)' : 'transparent',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            color: updateCheck.available ? '#f5c542' : '#8b96ab',
+          }}
+        >
+          {/* refresh-cw: circular arrows — the update affordance. */}
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M8 16H3v5" />
+          </svg>
+          {updateCheck.available && (
+            <span
+              data-update-available
+              style={{
+                position: 'absolute',
+                top: -2,
+                right: -2,
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                background: '#f5c542',
+                border: '2px solid rgba(20, 24, 32, 0.95)',
+                pointerEvents: 'none',
+              }}
+            />
+          )}
+        </button>
+      ),
+    },
+  ]
 
   /** Focus the dot at `index` (no-op while the list is unmounted). */
   const focusDotAt = (index: number): void => {
@@ -740,13 +1196,16 @@ export function MilestoneRail({
         </button>
       )}
 
+      {/* B1 collapsible toolbar: the function-key area. Collapsed by default —
+          only the expand arrow, the settings gear, and the user's PINNED
+          features render; everything else mounts only while expanded. */}
       <button
         type="button"
-        data-bookmarks-toggle
-        aria-label={t('bookmark.filter')}
-        aria-pressed={bookmarksOnly}
-        data-active={bookmarksOnly ? 'true' : undefined}
-        onClick={() => setBookmarksOnly((v) => !v)}
+        data-toolbar-expand
+        aria-expanded={toolbarExpanded}
+        aria-label={toolbarExpanded ? t('toolbar.collapse') : t('toolbar.expand')}
+        title={toolbarExpanded ? t('toolbar.collapse') : t('toolbar.expand')}
+        onClick={() => setToolbarExpanded((v) => !v)}
         style={{
           width: DOT_HIT,
           height: DOT_HIT,
@@ -754,85 +1213,15 @@ export function MilestoneRail({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: bookmarksOnly ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+          background: 'transparent',
           border: 'none',
           padding: 0,
           cursor: 'pointer',
-          color: bookmarksOnly ? '#9db8ff' : '#8b96ab',
+          color: '#8b96ab',
         }}
       >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill={bookmarksOnly ? 'currentColor' : 'none'}
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="m12 2 3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-        </svg>
-      </button>
-
-      <button
-        type="button"
-        data-focus-toggle
-        aria-label={focusActive ? t('focus.off') : t('focus.on')}
-        title={focusActive ? t('focus.off') : t('focus.on')}
-        aria-pressed={focusActive}
-        onClick={() => setFocusActive((v) => !v)}
-        style={{
-          width: DOT_HIT,
-          height: DOT_HIT,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: focusActive ? 'rgba(126, 226, 168, 0.14)' : 'transparent',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          color: focusActive ? '#7ee2a8' : '#8b96ab',
-        }}
-      >
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
-          <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      </button>
-
-      <button
-        type="button"
-        data-list-toggle
-        aria-label={listOpen ? t('list.close') : t('list.open')}
-        title={listOpen ? t('list.close') : t('list.open')}
-        aria-pressed={listOpen}
-        onClick={() => setListOpen((v) => !v)}
-        style={{
-          width: DOT_HIT,
-          height: DOT_HIT,
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: listOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
-          border: 'none',
-          padding: 0,
-          cursor: 'pointer',
-          color: listOpen ? '#9db8ff' : '#8b96ab',
-        }}
-      >
+        {/* Collapsed: chevron-down (expand reveals the features below);
+            expanded: chevron-up (collapse tucks them away). */}
         <svg
           width="16"
           height="16"
@@ -841,21 +1230,21 @@ export function MilestoneRail({
           stroke="currentColor"
           strokeWidth="2.5"
           strokeLinecap="round"
+          strokeLinejoin="round"
           aria-hidden="true"
         >
-          <path d="M3 6h18" />
-          <path d="M3 12h18" />
-          <path d="M3 18h18" />
+          {toolbarExpanded ? <path d="m18 15-6-6-6 6" /> : <path d="m6 9 6 6 6-6" />}
         </svg>
       </button>
 
       <button
         type="button"
-        data-session-search-toggle
-        aria-label={crossOpen ? t('search.cross.close') : t('search.cross.open')}
-        title={crossOpen ? t('search.cross.close') : t('search.cross.open')}
-        aria-pressed={crossOpen}
-        onClick={() => setCrossOpen((v) => !v)}
+        ref={settingsBtnRef}
+        data-toolbar-settings
+        aria-expanded={settingsOpen}
+        aria-label={settingsOpen ? t('toolbar.settings.close') : t('toolbar.settings.open')}
+        title={settingsOpen ? t('toolbar.settings.close') : t('toolbar.settings.open')}
+        onClick={() => setSettingsOpen((v) => !v)}
         style={{
           width: DOT_HIT,
           height: DOT_HIT,
@@ -863,14 +1252,13 @@ export function MilestoneRail({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: crossOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
+          background: settingsOpen ? 'rgba(77, 124, 254, 0.18)' : 'transparent',
           border: 'none',
           padding: 0,
           cursor: 'pointer',
-          color: crossOpen ? '#9db8ff' : '#8b96ab',
+          color: settingsOpen ? '#9db8ff' : '#8b96ab',
         }}
       >
-        {/* A list of rows with a magnifier overlaid — cross-session search. */}
         <svg
           width="16"
           height="16"
@@ -882,27 +1270,276 @@ export function MilestoneRail({
           strokeLinejoin="round"
           aria-hidden="true"
         >
-          <path d="M3 6h9" />
-          <path d="M3 12h9" />
-          <path d="M3 18h9" />
-          <circle cx="17" cy="7" r="3.5" />
-          <path d="m19.5 9.5 2.5 2.5" />
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
       </button>
 
-      <RailSearchUi
-        panelTop={railBox.top}
-        panelRight={railBox.right + DOT_HIT + 8}
-        query={search.query}
-        panelOpen={search.panelOpen}
-        matches={matches.length}
-        total={displayMarks.length}
-        onToggle={() => setSearch((s) => ({ ...s, panelOpen: !s.panelOpen }))}
-        onQueryChange={updateQuery}
-        onSearchKeyDown={onSearchKeyDown}
-        onClear={clearSearch}
-        t={t}
-      />
+      {toolbarFeatures.map((feature) =>
+        featureVisible(feature.id) ? <Fragment key={feature.id}>{feature.render()}</Fragment> : null,
+      )}
+
+      {settingsOpen && (
+        <div
+          ref={settingsRef}
+          data-toolbar-settings-panel
+          style={{
+            position: 'fixed',
+            top: railBox.top,
+            right: railBox.right + DOT_HIT + 8,
+            // Clamp so the menu never overflows a narrow viewport.
+            width: 'min(240px, calc(100vw - 48px))',
+            padding: '10px 12px',
+            background: 'rgba(20, 24, 32, 0.97)',
+            color: '#e6e8ee',
+            borderRadius: 8,
+            boxShadow: '0 6px 20px rgba(0, 0, 0, 0.4)',
+            zIndex: 104,
+          }}
+        >
+          {/* Row hover highlight, inline like the list panel's. */}
+          <style>{`[data-toolbar-pin-toggle]:hover { background: rgba(77, 124, 254, 0.18); }`}</style>
+          <div
+            data-toolbar-settings-title
+            style={{ fontSize: 13, fontWeight: 600, color: '#e6e8ee', marginBottom: 2 }}
+          >
+            {t('settings.title')}
+          </div>
+          {/* Column caption for the pin checkboxes — the "show outside
+              collapse" knob each row toggles. */}
+          <div
+            style={{ fontSize: 12, color: '#8b96ab', marginBottom: 4, textAlign: 'right' }}
+          >
+            {t('settings.pin')}
+          </div>
+          <div
+            role="menu"
+            aria-label={t('settings.title')}
+            style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+          >
+            {toolbarFeatures.map((feature) => {
+              const checked = pinned.includes(feature.id)
+              return (
+                <button
+                  key={feature.id}
+                  type="button"
+                  role="menuitemcheckbox"
+                  data-toolbar-pin-toggle
+                  data-pin-id={feature.id}
+                  aria-checked={checked}
+                  onClick={() => onTogglePin(feature.id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    width: '100%',
+                    padding: '6px 8px',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    color: '#e6e8ee',
+                    fontSize: 13,
+                    textAlign: 'left',
+                  }}
+                >
+                  <span>{t(feature.labelKey)}</span>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 14,
+                      height: 14,
+                      flexShrink: 0,
+                      borderRadius: 3,
+                      border: '1px solid rgba(255, 255, 255, 0.35)',
+                      background: checked ? 'rgba(77, 124, 254, 0.9)' : 'transparent',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#ffffff',
+                      fontSize: 10,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {checked ? '✓' : ''}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+          <button
+            type="button"
+            data-toolbar-settings-reset
+            onClick={onResetPins}
+            style={{
+              width: '100%',
+              marginTop: 6,
+              padding: '6px 8px',
+              background: 'transparent',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+              color: '#8b96ab',
+              fontSize: 13,
+              textAlign: 'left',
+            }}
+          >
+            {t('settings.reset')}
+          </button>
+          <div
+            data-toolbar-settings-footer
+            style={{
+              marginTop: 8,
+              paddingTop: 8,
+              borderTop: '1px solid rgba(255, 255, 255, 0.12)',
+            }}
+          >
+            <div style={{ fontSize: 12, color: '#8b96ab', marginBottom: 6 }}>{t('settings.support')}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <a
+                href={PLUGIN_REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
+              >
+                {t('settings.repo')}
+              </a>
+              <a
+                href={PLUGIN_REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
+              >
+                {t('settings.star')}
+              </a>
+              <a
+                href={`${PLUGIN_REPO_URL}/issues`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
+              >
+                {t('settings.issues')}
+              </a>
+              <a
+                href={PLUGIN_NPM_URL}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: 12, color: '#9db8ff', textDecoration: 'none' }}
+              >
+                {t('settings.npm')}
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {updateOpen && (
+        <div
+          ref={updatePanelRef}
+          data-update-panel
+          style={{
+            position: 'fixed',
+            top: railBox.top,
+            right: railBox.right + DOT_HIT + 8,
+            // Clamp so the popover never overflows a narrow viewport.
+            width: 'min(280px, calc(100vw - 48px))',
+            padding: '10px 12px',
+            background: 'rgba(20, 24, 32, 0.97)',
+            color: '#e6e8ee',
+            borderRadius: 8,
+            boxShadow: '0 6px 20px rgba(0, 0, 0, 0.4)',
+            zIndex: 104,
+          }}
+        >
+          <div
+            data-update-title
+            style={{ fontSize: 13, fontWeight: 600, color: '#e6e8ee', marginBottom: 8 }}
+          >
+            {t('update.title')}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, lineHeight: 1.5 }}>
+            <div>
+              <span style={{ color: '#8b96ab' }}>{t('update.current')}: </span>
+              <span>{PLUGIN_VERSION}</span>
+            </div>
+            {updateCheck.phase === 'ok' && updateCheck.latest !== null && (
+              <div data-update-latest>
+                <span style={{ color: '#8b96ab' }}>{t('update.latest')}: </span>
+                <span>{updateCheck.latest}</span>
+                <span style={{ color: '#8b96ab' }}> ({updateCheck.source})</span>
+              </div>
+            )}
+            {updateCheck.phase === 'checking' && (
+              <div data-update-status style={{ color: '#8b96ab' }}>{t('update.checking')}</div>
+            )}
+            {updateCheck.phase === 'failed' && (
+              <div data-update-failed>
+                <span>{t('update.failed')}:</span>{' '}
+                <span style={{ color: '#8b96ab' }}>{updateCheck.error}</span>{' '}
+                <button
+                  type="button"
+                  data-update-retry
+                  onClick={runUpdateCheck}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    color: '#9db8ff',
+                    fontSize: 12,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  {t('update.retry')}
+                </button>
+              </div>
+            )}
+            {updateCheck.phase === 'ok' && updateCheck.latest !== null && (
+              <div data-update-conclusion>
+                {updateCheck.available ? (
+                  <>
+                    <span>{t('update.available')} v{updateCheck.latest} → </span>
+                    <a
+                      href={PLUGIN_NPM_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: '#9db8ff', textDecoration: 'none' }}
+                    >
+                      {t('update.goNpm')}
+                    </a>
+                  </>
+                ) : (
+                  <span style={{ color: '#7ee2a8' }}>{t('update.upToDate')}</span>
+                )}
+              </div>
+            )}
+            <div data-update-host-lines>
+              <span style={{ color: '#8b96ab' }}>{t('update.hostLines')}: </span>
+              <span>{SUPPORTED_HOST_LINES.map(hostLineLabel).join('、')}</span>
+            </div>
+            <button
+              type="button"
+              data-update-manual
+              disabled={updateCheck.phase === 'checking'}
+              onClick={runUpdateCheck}
+              style={{
+                marginTop: 4,
+                padding: '6px 10px',
+                background: updateCheck.phase === 'checking' ? 'transparent' : 'rgba(77, 124, 254, 0.18)',
+                border: 'none',
+                borderRadius: 6,
+                cursor: updateCheck.phase === 'checking' ? 'default' : 'pointer',
+                color: updateCheck.phase === 'checking' ? '#5a6375' : '#9db8ff',
+                fontSize: 12,
+                alignSelf: 'flex-start',
+              }}
+            >
+              {updateCheck.phase === 'checking' ? t('update.checking') : t('update.check')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {listOpen && (
         <MilestoneListPanel

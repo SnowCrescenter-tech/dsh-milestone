@@ -29,6 +29,13 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+/** B1: the toolbar defaults COLLAPSED — expand it to reveal the focus toggle. */
+function expandToolbar() {
+  const btn = document.querySelector<HTMLElement>('[data-toolbar-expand]')
+  if (btn === null) throw new Error('data-toolbar-expand not found')
+  fireEvent.click(btn)
+}
+
 /** The rail-top focus-mode toggle button. */
 function focusToggle(): HTMLElement {
   const el = document.querySelector<HTMLElement>('[data-focus-toggle]')
@@ -54,6 +61,7 @@ function styleContaining(fragment: string): string | null {
 describe('MilestoneRail focus mode (P3)', () => {
   it('renders a focus toggle button with aria-pressed false and the focus.on label', () => {
     renderRail(USERS)
+    expandToolbar()
 
     const toggle = focusToggle()
     expect(toggle).toBeInTheDocument()
@@ -63,6 +71,7 @@ describe('MilestoneRail focus mode (P3)', () => {
 
   it('clicking the toggle flips data-focus-active on the rail root and aria-pressed', () => {
     renderRail(USERS)
+    expandToolbar()
     const toggle = focusToggle()
     const root = railRoot()
 
@@ -81,6 +90,7 @@ describe('MilestoneRail focus mode (P3)', () => {
 
   it('emits the think-block dim style only while focus is active', () => {
     renderRail(USERS)
+    expandToolbar()
 
     expect(styleContaining('[data-variant="think"]')).toBeNull()
 
@@ -95,6 +105,7 @@ describe('MilestoneRail focus mode (P3)', () => {
 
   it('focus toggling leaves the search and bookmark toggles intact', () => {
     renderRail(USERS)
+    expandToolbar()
 
     fireEvent.click(focusToggle())
 

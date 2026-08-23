@@ -9,9 +9,13 @@
  * Externals mirror CLIENT_EXTERNALS = PLATFORM_MODULES + the runtime/client
  * exemption; they resolve from the web loader's module table at runtime.
  */
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'tsdown'
 
 const ID = 'dsh-milestone'
+
+/** Build-time plugin version injected into the client bundle (version-meta.ts reads it). */
+const PLUGIN_VERSION = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version as string
 
 /** Platform modules the web loader provides (packages/client/web/src/platform.ts). */
 const PLATFORM_MODULES = [
@@ -58,6 +62,7 @@ export default defineConfig(() => [
     external: CLIENT_EXTERNALS,
     noExternal: (id: string) => (CLIENT_EXTERNALS.includes(id) ? undefined : true),
     define: {
+      '__DSH_MILESTONE_VERSION__': JSON.stringify(PLUGIN_VERSION),
       'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'production'),
       'import.meta.env': JSON.stringify({ MODE: process.env.NODE_ENV ?? 'production' }),

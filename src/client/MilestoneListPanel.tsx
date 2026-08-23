@@ -10,8 +10,17 @@
  * the panel its anchor, the full marks array, and the jump handler as props
  * — same split as RailSearchUi. Renders one DOM contract
  * (`data-milestone-list` root / `data-list-item` rows with `data-jump-key`).
+ *
+ * Outside dismissal: while the panel is mounted (it only renders while open),
+ * a pointerdown anywhere outside it calls the rail-fed `onClose` (shared
+ * useOutsideDismiss hook; the toggle's own click keeps its flip semantics
+ * through a `[data-list-toggle]` exclusion). MilestoneRail.tsx does NOT pass
+ * onClose in the current tree (its owner is wiring it separately) — until
+ * then the hook is inert and the panel keeps its existing behaviour.
  */
+import { useRef } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
 
 /** One list entry: the mark slice the list panel renders. */
 interface ListMark {
@@ -31,6 +40,8 @@ export interface MilestoneListPanelProps {
   readonly marks: readonly ListMark[]
   /** The rail's jump handler: scrolls the `[data-chat-anchor-key]` row into view. */
   readonly onJump: (key: string) => void
+  /** Outside-click close handler (wired by MilestoneRail); absent → dismissal stays inert. */
+  readonly onClose?: () => void
   /** Locale interpreter: resolves `dsh-milestone` dictionary keys (from MilestoneRail). */
   readonly t: TranslateNS<'dsh-milestone'>
 }
@@ -38,9 +49,16 @@ export interface MilestoneListPanelProps {
 /**
  * @param props - the panel anchor, the full marks array, and the rail's jump handler.
  */
-export function MilestoneListPanel({ panelTop, panelRight, marks, onJump, t }: MilestoneListPanelProps) {
+export function MilestoneListPanel({ panelTop, panelRight, marks, onJump, onClose, t }: MilestoneListPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  // The panel is only mounted while open, so `open` is a constant true;
+  // closing = unmount, which runs the hook's cleanup.
+  useOutsideDismiss(panelRef, true, onClose, {
+    exclude: (target) => outsideDismissMatches(target, '[data-list-toggle]'),
+  })
   return (
     <div
+      ref={panelRef}
       data-milestone-list
       style={{
         position: 'fixed',

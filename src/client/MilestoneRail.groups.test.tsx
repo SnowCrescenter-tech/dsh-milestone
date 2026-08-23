@@ -231,6 +231,8 @@ describe('MilestoneRail turn grouping (C4)', () => {
   it('search N/M total keeps the full mark count while a turn is collapsed', () => {
     renderGroups({ users: USERS, userTurns: [1, 1, 2] })
 
+    // B1: the toolbar defaults COLLAPSED — expand it to reveal the search toggle.
+    fireEvent.click(screen.getByRole('button', { name: '展开工具栏' }))
     // Every fixture message contains '条': 3/3 matches.
     fireEvent.click(screen.getByRole('button', { name: '搜索消息' }))
     fireEvent.change(searchInput(), { target: { value: '条' } })

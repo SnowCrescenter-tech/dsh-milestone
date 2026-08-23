@@ -41,6 +41,13 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** B1: the toolbar defaults COLLAPSED — expand it to reveal the rail-top toggles. */
+function expandToolbar() {
+  const btn = document.querySelector<HTMLElement>('[data-toolbar-expand]')
+  if (btn === null) throw new Error('data-toolbar-expand not found')
+  fireEvent.click(btn)
+}
+
 function dot(n: number) {
   return screen.getByRole('button', { name: `跳转到第 ${n} 条消息` })
 }
@@ -109,6 +116,7 @@ describe('MilestoneRail bookmarks', () => {
 
   it('the bookmarks-only filter hides non-bookmarked dots and stays active', () => {
     renderRail(USERS, { bookmarks: [USERS[0].key] })
+    expandToolbar()
 
     const toggle = bookmarksToggle()
     fireEvent.click(toggle)
@@ -122,6 +130,7 @@ describe('MilestoneRail bookmarks', () => {
 
   it('with zero bookmarks the filter still renders its toggle but no dots', () => {
     renderRail(USERS)
+    expandToolbar()
 
     const toggle = bookmarksToggle()
     fireEvent.click(toggle)
@@ -132,6 +141,7 @@ describe('MilestoneRail bookmarks', () => {
 
   it('the search N/M counter reflects the bookmarked total while filtering', () => {
     renderRail(USERS, { bookmarks: [USERS[0].key] })
+    expandToolbar()
 
     fireEvent.click(bookmarksToggle())
     fireEvent.click(screen.getByRole('button', { name: '搜索消息' }))

@@ -64,6 +64,13 @@ function pressKey(key: string): void {
   fireEvent.keyDown(target, { key })
 }
 
+/** B1: the toolbar defaults COLLAPSED — expand it to reveal the search toggle. */
+function expandToolbar() {
+  const btn = document.querySelector<HTMLElement>('[data-toolbar-expand]')
+  if (btn === null) throw new Error('data-toolbar-expand not found')
+  fireEvent.click(btn)
+}
+
 function searchToggle(): HTMLElement {
   return screen.getByRole('button', { name: '搜索消息' })
 }
@@ -154,6 +161,7 @@ describe('MilestoneRail keyboard navigation (RED — feature not implemented)', 
     const user = userEvent.setup()
 
     render()
+    expandToolbar()
     const list = railList()
     list.focus()
     pressKey('Home') // first dot owns focus

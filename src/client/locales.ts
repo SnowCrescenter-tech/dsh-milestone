@@ -91,6 +91,52 @@ export const zh = {
   'search.error': '搜索失败，请重试',
   /** Cross-session search footer hint when the harness capped the result list. */
   'search.more': '结果已截断，请细化关键词',
+  /** aria-label on the toolbar expand arrow while the toolbar is COLLAPSED (expand it). */
+  'toolbar.expand': '展开工具栏',
+  /** aria-label on the toolbar expand arrow while the toolbar is EXPANDED (collapse it). */
+  'toolbar.collapse': '收起工具栏',
+  /** aria-label on the toolbar settings gear while the settings menu is CLOSED. */
+  'toolbar.settings.open': '打开设置',
+  /** aria-label on the toolbar settings gear while the settings menu is OPEN. */
+  'toolbar.settings.close': '关闭设置',
+  /** Header title of the toolbar settings menu. */
+  'settings.title': '设置',
+  /** Per-feature toggle label inside the settings menu: keep visible while collapsed. */
+  'settings.pin': '在折叠外显示',
+  /** Settings action that clears every pinned feature. */
+  'settings.reset': '恢复默认',
+  /** Settings footer heading above the project links. */
+  'settings.support': '支持我们',
+  /** Settings footer link: the GitHub repository. */
+  'settings.repo': 'GitHub 仓库',
+  /** Settings footer link: star the repository. */
+  'settings.star': '欢迎 Star ★',
+  /** Settings footer link: file an issue. */
+  'settings.issues': '提交 Issue',
+  /** Settings footer link: the npm install channel. */
+  'settings.npm': 'npm 安装渠道',
+  /** B4 update-check: toolbar button label + title/aria-label. */
+  'update.check': '检查更新',
+  /** B4 update-check: popover title. */
+  'update.title': '更新检测',
+  /** B4 update-check: installed-version row label. */
+  'update.current': '当前版本',
+  /** B4 update-check: newest-published-version row label. */
+  'update.latest': '最新版本',
+  /** B4 update-check: conclusion when the installed version is current. */
+  'update.upToDate': '已是最新版本',
+  /** B4 update-check: conclusion when a newer version exists. */
+  'update.available': '发现新版本',
+  /** B4 update-check: link text for the npm upgrade channel. */
+  'update.goNpm': '去 npm 升级',
+  /** B4 update-check: supported-host-lines metadata row label. */
+  'update.hostLines': '已适配官方版本线',
+  /** B4 update-check: in-flight state of the manual check button. */
+  'update.checking': '检查中…',
+  /** B4 update-check: failed state heading. */
+  'update.failed': '检查失败',
+  /** B4 update-check: retry action inside the failed state. */
+  'update.retry': '重试',
 } as const
 
 export type MilestoneKey = keyof typeof zh
@@ -136,4 +182,27 @@ export const en: Record<MilestoneKey, string> = {
   'search.untitled': '(untitled)',
   'search.error': 'Search failed, retry',
   'search.more': 'Results truncated — refine your query',
+  'toolbar.expand': 'Expand toolbar',
+  'toolbar.collapse': 'Collapse toolbar',
+  'toolbar.settings.open': 'Open settings',
+  'toolbar.settings.close': 'Close settings',
+  'settings.title': 'Settings',
+  'settings.pin': 'Show outside collapse',
+  'settings.reset': 'Restore defaults',
+  'settings.support': 'Support us',
+  'settings.repo': 'GitHub repo',
+  'settings.star': 'Give us a Star ★',
+  'settings.issues': 'Report an Issue',
+  'settings.npm': 'Install via npm',
+  'update.check': 'Check updates',
+  'update.title': 'Update check',
+  'update.current': 'Current version',
+  'update.latest': 'Latest version',
+  'update.upToDate': 'You are up to date',
+  'update.available': 'Update available',
+  'update.goNpm': 'Upgrade on npm',
+  'update.hostLines': 'Supported official version lines',
+  'update.checking': 'Checking…',
+  'update.failed': 'Check failed',
+  'update.retry': 'Retry',
 }

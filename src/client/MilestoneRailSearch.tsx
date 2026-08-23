@@ -10,9 +10,19 @@
  * ceiling while the two still render one DOM contract
  * (`data-search-toggle` / `data-rail-search` / `data-match-count` /
  * `data-search-clear`).
+ *
+ * Outside dismissal: while the panel is open, a pointerdown anywhere outside
+ * it closes it (shared useOutsideDismiss hook). The toggle's own click keeps
+ * its flip semantics — a pointerdown on `[data-search-toggle]` is excluded
+ * from the hook and left to the rail's onToggle. Without a dedicated onClose
+ * prop the fallback is the toggle-off path (query retained, same as clicking
+ * the toggle), matching the rail's current call site; a dedicated onClose
+ * (clearSearch-equivalent) takes precedence once MilestoneRail feeds one.
  */
+import { useRef } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
 
 /** Dot diameter (px) — matches the rail's DOT_HIT so the toggle aligns. */
 const DOT_HIT = 28
@@ -31,6 +41,8 @@ export interface RailSearchUiProps {
   readonly onQueryChange: (query: string) => void
   readonly onSearchKeyDown: (e: ReactKeyboardEvent<HTMLInputElement>) => void
   readonly onClear: () => void
+  /** Dedicated outside-click close handler; falls back to the toggle-off path when absent. */
+  readonly onClose?: () => void
   /** Locale interpreter: resolves `dsh-milestone` dictionary keys (from MilestoneRail). */
   readonly t: TranslateNS<'dsh-milestone'>
 }
@@ -49,8 +61,13 @@ export function RailSearchUi({
   onQueryChange,
   onSearchKeyDown,
   onClear,
+  onClose,
   t,
 }: RailSearchUiProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  useOutsideDismiss(panelRef, panelOpen, onClose ?? (() => onToggle()), {
+    exclude: (target) => outsideDismissMatches(target, '[data-search-toggle]'),
+  })
   return (
     <>
       <button
@@ -90,6 +107,7 @@ export function RailSearchUi({
 
       {panelOpen && (
         <div
+          ref={panelRef}
           style={{
             position: 'fixed',
             top: panelTop,
