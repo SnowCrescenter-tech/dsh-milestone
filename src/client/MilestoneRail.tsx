@@ -57,7 +57,7 @@ import { en, translateDict, zh, type MilestoneKey } from './locales.ts'
 import { buildRenderList, buildTurnGroups } from './turn-group-logic'
 import { RailSearchUi } from './MilestoneRailSearch.tsx'
 import { MilestoneListPanel } from './MilestoneListPanel.tsx'
-import { MilestoneOnboarding } from './MilestoneOnboarding.tsx'
+import { MilestoneTour } from './MilestoneTour.tsx'
 import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { MilestoneSessionSearch } from './MilestoneSessionSearch.tsx'
 import type { SearchSessionsFn } from './MilestoneSessionSearch.tsx'
@@ -338,8 +338,8 @@ const DEEP_LINK_MAX_RETRY_POLLS = 5
 /** B4 update-check: mount-time silent check delay (ms) — give the harness
  * time to settle before hitting the registry. */
 const UPDATE_CHECK_MOUNT_DELAY = 1500
-/** 0.6.4 first-run tutorial: mount-time show delay (ms) — let the rail settle
- * before the onboarding modal pops. */
+/** 0.6.5 first-run coach tour: mount-time show delay (ms) — let the rail settle
+ * before the first bubble pops. */
 const ONBOARDING_MOUNT_DELAY = 800
 
 /** One user message: its node key (DOM anchor), turn, and payload bits. */
@@ -779,9 +779,13 @@ export function MilestoneRail({
   const [expandHovered, setExpandHovered] = useState(false)
   const [settingsHovered, setSettingsHovered] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // 0.6.4 first-run tutorial: open only when the mount timer fires and no
+  // 0.6.5 first-run coach tour: open only when the mount timer fires and no
   // onboarded flag is persisted (or when the user replays it from settings).
-  const [onboardingOpen, setOnboardingOpen] = useState(false)
+  // `tourRun` bumps on 重新查看教程: the key change REMOUNTS the tour so the
+  // replay always restarts from bubble 0 (even when the tour was already open,
+  // suspended behind the settings modal).
+  const [tourOpen, setTourOpen] = useState(false)
+  const [tourRun, setTourRun] = useState(0)
   /** The feature whose near-row description tip is currently visible
    * (`null` = none — tips only appear on hover/focus of their own row). */
   const [descFeature, setDescFeature] = useState<ToolbarPinId | null>(null)
@@ -877,16 +881,16 @@ export function MilestoneRail({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 0.6.4 first-run tutorial: ~800ms after the rail mounts, if the user has
-  // never completed/skipped it, open the onboarding modal. The flag is read
-  // at FIRE time (not mount time) so a replay-from-settings that completes
-  // before the delay never double-pops; cancelled on unmount so a stale
-  // timer never fires into a dead session. The modal itself only RENDERS
-  // inside the rail's returned tree, so sessions under the rail's minimum
-  // mark count (see the early return) simply never show it.
+  // 0.6.5 first-run coach tour: ~800ms after the rail mounts, if the user has
+  // never completed/skipped it, open the tour. The flag is read at FIRE time
+  // (not mount time) so a replay-from-settings that completes before the delay
+  // never double-pops; cancelled on unmount so a stale timer never fires into
+  // a dead session. The tour itself only RENDERS inside the rail's returned
+  // tree, so sessions under the rail's minimum mark count (see the early
+  // return) simply never show it.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (!readOnboardedFlag()) setOnboardingOpen(true)
+      if (!readOnboardedFlag()) setTourOpen(true)
     }, ONBOARDING_MOUNT_DELAY)
     return () => window.clearTimeout(timer)
   }, [])
@@ -1095,12 +1099,14 @@ export function MilestoneRail({
     settingsBtnRef.current?.focus()
   }
 
-  /** 0.6.4: settings → 重新查看教程 — close settings and replay the tutorial
-   * immediately (the flag may or may not be set; skipping/completing it
-   * re-persists the flag anyway). */
-  const reopenOnboarding = (): void => {
+  /** 0.6.5: settings → 重新查看教程 — close settings and replay the coach
+   * tour immediately (the flag may or may not be set; skipping/completing it
+   * re-persists the flag anyway). The `tourRun` bump remounts the tour so the
+   * replay always restarts from bubble 0. */
+  const reopenTour = (): void => {
     setSettingsOpen(false)
-    setOnboardingOpen(true)
+    setTourRun((n) => n + 1)
+    setTourOpen(true)
   }
 
   /** B1: a feature renders while the toolbar is EXPANDED or while it is pinned. */
@@ -2297,7 +2303,7 @@ export function MilestoneRail({
               <button
                 type="button"
                 data-onboarding-reopen
-                onClick={reopenOnboarding}
+                onClick={reopenTour}
                 style={{
                   padding: '7px 16px',
                   border: `1px solid ${MODAL_BORDER}`,
@@ -2307,15 +2313,23 @@ export function MilestoneRail({
                   fontSize: 12.5,
                 }}
               >
-                {t('onboarding.reopen')}
+                {t('tour.reopen')}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {onboardingOpen && (
-        <MilestoneOnboarding t={t} accent={accent} onClose={() => setOnboardingOpen(false)} />
+      {tourOpen && (
+        <MilestoneTour
+          key={tourRun}
+          t={t}
+          side={side}
+          toolbarExpanded={toolbarExpanded}
+          settingsOpen={settingsOpen}
+          onSetToolbarExpanded={setToolbarExpanded}
+          onClose={() => setTourOpen(false)}
+        />
       )}
 
       {updateOpen && (

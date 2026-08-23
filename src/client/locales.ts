@@ -217,72 +217,40 @@ export const zh = {
   'settings.lang.zh': '中文',
   /** Language option: force English copy. */
   'settings.lang.en': 'English',
-  /** 0.6.4 onboarding: welcome title (also the tutorial dialog's aria-label). */
-  'onboarding.welcome.title': '欢迎使用 dsh-milestone',
-  /** 0.6.4 onboarding: one-line positioning statement on the welcome page. */
-  'onboarding.welcome.subtitle': '一条附着在会话侧边的里程碑导航：悬停圆点看元信息，点击跳到任意提问。',
-  /** 0.6.4 onboarding: primary action on the welcome page → step 1. */
-  'onboarding.start': '开始引导',
-  /** 0.6.4 onboarding: skip action — persists the flag and closes, on EVERY page. */
-  'onboarding.skip': '跳过',
-  /** 0.6.4 onboarding: step-page progress text `第 n / 4 步`. */
-  'onboarding.step.label': '第 {n} / 4 步',
-  /** 0.6.4 onboarding: aria-label on one progress dot. */
-  'onboarding.step.short': '第 {n} 步',
-  /** 0.6.4 onboarding: step-page back navigation. */
-  'onboarding.prev': '上一步',
-  /** 0.6.4 onboarding: step-page forward navigation (steps 1–3). */
-  'onboarding.next': '下一步',
-  /** 0.6.4 onboarding: step-4 primary action — persists the flag and closes. */
-  'onboarding.finish': '开始使用',
-  /** 0.6.4 onboarding: step 1 title — the dot timeline. */
-  'onboarding.step1.title': '圆点时间线',
-  /** 0.6.4 onboarding: step 1 line 1. */
-  'onboarding.step1.desc1': '每条提问在侧边对应一个圆点，自上而下按时间排列。',
-  /** 0.6.4 onboarding: step 1 line 2. */
-  'onboarding.step1.desc2': '悬停圆点，查看该轮元信息（用时、首字、模型与 Token）。',
-  /** 0.6.4 onboarding: step 1 line 3. */
-  'onboarding.step1.desc3': '点击任意圆点，会话立即跳到那条提问。',
-  /** 0.6.4 onboarding: step 2 title — in-rail search & bookmarks. */
-  'onboarding.step2.title': '搜索与收藏',
-  /** 0.6.4 onboarding: step 2 line 1. */
-  'onboarding.step2.desc1': '输入关键词过滤圆点，只点亮匹配项并显示 N / M 计数；Enter 逐个跳转，Esc 关闭。',
-  /** 0.6.4 onboarding: step 2 line 2. */
-  'onboarding.step2.desc2': '星标收藏重要消息，再用「只看收藏」一键过滤。',
-  /** 0.6.4 onboarding: step 3 title — personalization & settings. */
-  'onboarding.step3.title': '个性化与设置',
-  /** 0.6.4 onboarding: step 3 line 1. */
-  'onboarding.step3.desc1': '调整强调色、圆点大小、距边距离与左右位置，即调即存。',
-  /** 0.6.4 onboarding: step 3 line 2. */
-  'onboarding.step3.desc2': '切换界面语言、搭配「聚焦」效果，或把常用功能 pin 在折叠外。',
-  /** 0.6.4 onboarding: step 4 title — update detection & support. */
-  'onboarding.step4.title': '更新检测与支持',
-  /** 0.6.4 onboarding: step 4 line 1. */
-  'onboarding.step4.desc1': '挂载后自动检查 npm 新版本；有新版本时工具栏会亮起提示。',
-  /** 0.6.4 onboarding: step 4 line 2. */
-  'onboarding.step4.desc2': '喜欢这个插件？欢迎 Star、提交 Issue，或通过 npm 安装升级。',
-  /** 0.6.4 onboarding demo: fake message 1 (step 1 dots / step 2 corpus). */
-  'onboarding.demo.m1': '帮我优化这段代码',
-  /** 0.6.4 onboarding demo: fake message 2. */
-  'onboarding.demo.m2': '解释这个报错',
-  /** 0.6.4 onboarding demo: fake message 3. */
-  'onboarding.demo.m3': '再检查边界条件',
-  /** 0.6.4 onboarding demo: fake message 4. */
-  'onboarding.demo.m4': '写个单元测试',
-  /** 0.6.4 onboarding demo: fake message 5. */
-  'onboarding.demo.m5': '总结一下方案',
-  /** 0.6.4 onboarding demo (step 1): hint under the toy dot rail. */
-  'onboarding.demo.hoverHint': '试试悬停与点击圆点',
-  /** 0.6.4 onboarding demo (step 2): hint under the toy search/favorite. */
-  'onboarding.demo.searchHint': '试试输入「报错」，或点星标切换只看收藏',
-  /** 0.6.4 onboarding demo (step 3): the 展开箭头 → 齿轮 → 设置 path hint. */
-  'onboarding.demo.settingsPath': '展开箭头 → 齿轮 → 设置',
-  /** 0.6.4 onboarding demo (step 3): legend label for the focus mix. */
-  'onboarding.demo.focusMix': '聚焦搭配',
-  /** 0.6.4 onboarding demo (step 3): legend label for pinning features. */
-  'onboarding.demo.pin': 'pin 固定',
-  /** 0.6.4 settings footer action: replay the tutorial. */
-  'onboarding.reopen': '重新查看教程',
+  /** 0.6.5 tour: bubble 0 title (also the bubble's aria-label). */
+  'tour.welcome.title': '欢迎使用 dsh-milestone',
+  /** 0.6.5 tour: bubble 0 description — the REAL rail list anchor. */
+  'tour.welcome.desc': '这是你的会话导航条：每条提问一个圆点，点击跳转，悬停查看元信息。',
+  /** 0.6.5 tour: bubble 1 title — the expand arrow. */
+  'tour.step1.title': '展开工具栏',
+  /** 0.6.5 tour: bubble 1 description — what clicking REALLY does (auto-advance on the real click). */
+  'tour.step1.desc': '点这里展开全部功能键：搜索、列表、收藏、聚焦、更新检测与设置都在里面。',
+  /** 0.6.5 tour: bubble 2 title — the settings gear. */
+  'tour.step2.title': '打开设置',
+  /** 0.6.5 tour: bubble 2 description — what opening settings contains (auto-advance on the real open). */
+  'tour.step2.desc': '打开设置：钉住常用键、个性化外观、切换语言、搭配「聚焦」。',
+  /** 0.6.5 tour: bubble 3 title — the dots (real hover/click behavior). */
+  'tour.step3.title': '圆点导航',
+  /** 0.6.5 tour: bubble 3 description. */
+  'tour.step3.desc': '每个圆点 = 一条提问——点击跳转，悬停查看时间、模型与用量。',
+  /** 0.6.5 tour: bubble 4 title — done. */
+  'tour.step4.title': '开始使用',
+  /** 0.6.5 tour: bubble 4 description — finish line. */
+  'tour.step4.desc': '去试试吧；有问题欢迎到 GitHub 提 Issue。',
+  /** 0.6.5 tour: primary action on bubble 0 (begin) and bubble 4 (finish). */
+  'tour.start': '开始使用',
+  /** 0.6.5 tour: forward navigation (bubbles 1–3; the real-click auto-advance comes first). */
+  'tour.next': '下一步',
+  /** 0.6.5 tour: back navigation (bubbles 1–4). */
+  'tour.prev': '上一步',
+  /** 0.6.5 tour: corner skip — every bubble, persists the flag. */
+  'tour.skip': '跳过',
+  /** 0.6.5 tour: progress text `第 n / 5 步`. */
+  'tour.step.label': '第 {n} / 5 步',
+  /** 0.6.5 tour: aria-label on one progress dot. */
+  'tour.step.short': '第 {n} 步',
+  /** 0.6.5 settings footer action: replay the tour (data-onboarding-reopen kept). */
+  'tour.reopen': '重新查看教程',
 } as const
 
 export type MilestoneKey = keyof typeof zh
@@ -391,39 +359,23 @@ export const en: Record<MilestoneKey, string> = {
   'settings.lang.system': 'Follow system',
   'settings.lang.zh': 'Chinese',
   'settings.lang.en': 'English',
-  'onboarding.welcome.title': 'Welcome to dsh-milestone',
-  'onboarding.welcome.subtitle': 'A milestone rail beside your conversation: hover a dot for metadata, click any dot to jump.',
-  'onboarding.start': 'Start the tour',
-  'onboarding.skip': 'Skip',
-  'onboarding.step.label': 'Step {n} of 4',
-  'onboarding.step.short': 'Step {n}',
-  'onboarding.prev': 'Back',
-  'onboarding.next': 'Next',
-  'onboarding.finish': 'Get started',
-  'onboarding.step1.title': 'The dot timeline',
-  'onboarding.step1.desc1': 'Every prompt is a dot on the side rail, listed top to bottom in time order.',
-  'onboarding.step1.desc2': 'Hover a dot to see that turn’s metadata (duration, first token, model, tokens).',
-  'onboarding.step1.desc3': 'Click any dot to jump the conversation straight to that prompt.',
-  'onboarding.step2.title': 'Search & bookmarks',
-  'onboarding.step2.desc1': 'Type to filter the dots — matches light up with an N / M counter; Enter jumps, Esc closes.',
-  'onboarding.step2.desc2': 'Star a message to bookmark it, then use “Bookmarks only” to filter.',
-  'onboarding.step3.title': 'Personalize & settings',
-  'onboarding.step3.desc1': 'Tune the accent color, dot size, edge distance, and left/right side — saved as you adjust.',
-  'onboarding.step3.desc2': 'Switch the UI language, compose your focus effect, or pin features outside the collapse.',
-  'onboarding.step4.title': 'Updates & support',
-  'onboarding.step4.desc1': 'A silent check runs after mount; when a new version exists, the toolbar shows a hint.',
-  'onboarding.step4.desc2': 'Enjoying the plugin? Star us, file an issue, or upgrade via npm.',
-  'onboarding.demo.m1': 'Help me optimize this code',
-  'onboarding.demo.m2': 'Explain this error',
-  'onboarding.demo.m3': 'Check the edge cases again',
-  'onboarding.demo.m4': 'Write a unit test',
-  'onboarding.demo.m5': 'Summarize the plan',
-  'onboarding.demo.hoverHint': 'Try hovering and clicking the dots',
-  'onboarding.demo.searchHint': 'Try typing “error”, or tap the star for bookmarks-only',
-  'onboarding.demo.settingsPath': 'Expand arrow → gear → Settings',
-  'onboarding.demo.focusMix': 'Focus mix',
-  'onboarding.demo.pin': 'Pin keys',
-  'onboarding.reopen': 'Replay the tour',
+  'tour.welcome.title': 'Welcome to dsh-milestone',
+  'tour.welcome.desc': 'This is your session milestone rail: every prompt is a dot — click to jump, hover for metadata.',
+  'tour.step1.title': 'Expand the toolbar',
+  'tour.step1.desc': 'Click to reveal every function key: search, list, bookmarks, focus, update check, and settings.',
+  'tour.step2.title': 'Open settings',
+  'tour.step2.desc': 'Open settings: pin your favorite keys, personalize the look, switch language, and tune focus.',
+  'tour.step3.title': 'Dot navigation',
+  'tour.step3.desc': 'Each dot is one prompt — click to jump, hover for time, model, and usage.',
+  'tour.step4.title': 'Get started',
+  'tour.step4.desc': 'Go try it — questions and issues are welcome on GitHub.',
+  'tour.start': 'Get started',
+  'tour.next': 'Next',
+  'tour.prev': 'Back',
+  'tour.skip': 'Skip',
+  'tour.step.label': 'Step {n} of 5',
+  'tour.step.short': 'Step {n}',
+  'tour.reopen': 'Replay the tour',
 }
 
 /**
