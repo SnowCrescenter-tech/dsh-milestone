@@ -20,8 +20,13 @@
  *   - `[data-toolbar-settings-overlay]`    the full-screen modal backdrop.
  *   - `[data-toolbar-settings-close]`      the modal close button.
  *   - `[data-toolbar-pin-toggle]`          one switch per feature (data-pin-id).
- *   - `[data-toolbar-settings-reset]`      the restore-defaults button.
- *   - `[data-toolbar-settings-footer]`     the support-us card grid.
+ *   - `[data-settings-tip]`                 one near-row description tip per feature
+ *                                          (role=tooltip, aria-describedby-linked; hidden
+ *                                          until its row is hovered or focused).
+ *   - `[data-settings-pin-hint]`            the section hint explaining the pin switch.
+ *   - `[data-personal-toggle]`              the collapsible personalization header (aria-expanded).
+ *   - `[data-toolbar-settings-reset]`       the restore-defaults button.
+ *   - `[data-toolbar-settings-footer]`      the support-us card grid.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
@@ -256,10 +261,18 @@ describe('MilestoneRail collapsible toolbar (B1 + B-design)', () => {
       expect(pinToggle(id)).toHaveAttribute('aria-checked', 'false')
     }
 
-    // The hover-description pane is visible by default (first feature).
-    const desc = document.querySelector('[data-settings-desc]')
-    expect(desc).not.toBeNull()
-    expect(desc!.textContent).toContain('按完整消息内容过滤并跳转')
+    // The fixed description pane is GONE — each row carries a hidden near-row
+    // tip (role=tooltip, tied to its switch via aria-describedby) that only
+    // appears on hover/focus.
+    expect(document.querySelector('[data-settings-desc]')).toBeNull()
+    const searchTip = document.querySelector<HTMLElement>('[data-settings-tip][data-tip-for="search"]')
+    expect(searchTip).not.toBeNull()
+    expect(searchTip).toHaveAttribute('role', 'tooltip')
+    expect(searchTip).not.toHaveAttribute('data-tip-visible', 'true')
+    expect(pinToggle('search')).toHaveAttribute('aria-describedby', searchTip!.id)
+
+    // The switch's meaning is restated by the section hint under the title.
+    expect(document.querySelector('[data-settings-pin-hint]')!.textContent).toContain('仍显示在箭头旁')
 
     // Backdrop pointerdown dismisses (the overlay wraps the dialog, so any
     // pointerdown outside the dialog — document.body here — closes it).
@@ -294,18 +307,38 @@ describe('MilestoneRail collapsible toolbar (B1 + B-design)', () => {
     expect(document.activeElement).toBe(gearButton())
   })
 
-  it('hovering a feature row reveals its description in the modal pane', () => {
+  it('hovering OR focusing a feature row reveals the near-row tip, tied by aria-describedby', () => {
     renderToolbarRail()
     openSettings()
 
-    const desc = document.querySelector('[data-settings-desc]')!
-    expect(desc.textContent).toContain('按完整消息内容过滤并跳转')
+    // Every row's tip exists but stays hidden until its row is active.
+    const tipFor = (id: string): HTMLElement =>
+      document.querySelector<HTMLElement>(`[data-settings-tip][data-tip-for="${id}"]`)!
+    for (const id of TOOLBAR_PIN_IDS) {
+      expect(tipFor(id)).toHaveAttribute('role', 'tooltip')
+      expect(tipFor(id)).not.toHaveAttribute('data-tip-visible', 'true')
+      expect(document.querySelector(`[data-toolbar-pin-toggle][data-pin-id="${id}"]`)).toHaveAttribute(
+        'aria-describedby',
+        tipFor(id).id,
+      )
+    }
 
+    // Hover reveals that row's own description, and only that one.
     fireEvent.mouseEnter(pinToggle('list'))
-    expect(desc.textContent).toContain('本会话全部提问一览')
+    expect(tipFor('list')).toHaveAttribute('data-tip-visible', 'true')
+    expect(tipFor('list').textContent).toContain('本会话全部提问一览')
+    expect(tipFor('search')).not.toHaveAttribute('data-tip-visible', 'true')
 
-    fireEvent.mouseEnter(pinToggle('settings'))
-    expect(desc.textContent).toContain('自定义工具栏与外观')
+    // Leaving the row hides it again.
+    fireEvent.mouseLeave(pinToggle('list'))
+    expect(tipFor('list')).not.toHaveAttribute('data-tip-visible', 'true')
+
+    // Keyboard focus reaches the same tip (the touch path), blur hides it.
+    fireEvent.focus(pinToggle('settings'))
+    expect(tipFor('settings')).toHaveAttribute('data-tip-visible', 'true')
+    expect(tipFor('settings').textContent).toContain('自定义工具栏与外观')
+    fireEvent.blur(pinToggle('settings'))
+    expect(tipFor('settings')).not.toHaveAttribute('data-tip-visible', 'true')
   })
 
   it('pinning a feature in settings keeps it visible while collapsed and persists the full blob', () => {
@@ -375,6 +408,8 @@ describe('MilestoneRail collapsible toolbar (B1 + B-design)', () => {
     expect(featureTogglesPresent()).toEqual(['bookmarks', 'focus'])
 
     openSettings()
+    // The personalization controls live inside the collapsed-by-default block.
+    fireEvent.click(document.querySelector<HTMLElement>('[data-personal-toggle]')!)
 
     // Personalization controls reflect the seeded custom values first.
     expect(document.querySelector('[data-accent-swatch][data-accent="#22c55e"]')).not.toBeNull()

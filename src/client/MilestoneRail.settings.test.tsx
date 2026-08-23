@@ -6,6 +6,10 @@
  * variables + data attributes; the rail side flips every floating layer to the
  * rail's other side.
  *
+ * 0.6.3 focus block: the same collapsible-section pattern now also hosts the
+ * focus "聚焦搭配" controls (dim think / dim tools / collapse think + the
+ * strength slider), persisted under `prefs.focus` and reset by 恢复默认.
+ *
  * The render helper mirrors MilestoneRail.toolbar.test.tsx (renderRail.tsx is
  * owned by an earlier phase — untouched).
  */
@@ -132,6 +136,21 @@ function openSettings() {
   if (settingsPanel() === null) fireEvent.click(gearButton())
 }
 
+/** Expand the collapsed-by-default personalization block (its controls only
+ * exist in the DOM while the block is open). */
+function expandPersonal() {
+  const toggle = document.querySelector<HTMLElement>('[data-personal-toggle]')
+  if (toggle === null) throw new Error('data-personal-toggle not found')
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle)
+}
+
+/** Expand the collapsed-by-default focus block (0.6.3). */
+function expandFocus() {
+  const toggle = document.querySelector<HTMLElement>('[data-focus-toggle-settings]')
+  if (toggle === null) throw new Error('data-focus-toggle-settings not found')
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle)
+}
+
 /** The nth dot button (1-based, matching its 跳转到第 N 条消息 label). */
 function dot(n: number): HTMLElement {
   const el = document.querySelector<HTMLElement>(`button[aria-label="跳转到第 ${n} 条消息"]`)
@@ -171,6 +190,7 @@ describe('MilestoneRail settings personalization (B-design #6)', () => {
   it('a preset accent swatch retints the dots, the rail vars, and persists', () => {
     const { backing } = renderSettingsRail()
     openSettings()
+    expandPersonal()
 
     fireEvent.click(document.querySelector('[data-accent-swatch][data-accent="#22c55e"]')!)
     closeAndReopen()
@@ -199,6 +219,7 @@ describe('MilestoneRail settings personalization (B-design #6)', () => {
   it('the custom color input drives the accent too', () => {
     const { backing } = renderSettingsRail()
     openSettings()
+    expandPersonal()
 
     const custom = document.querySelector<HTMLInputElement>('[data-accent-custom] input[type="color"]')!
     fireEvent.change(custom, { target: { value: '#ff8800' } })
@@ -215,6 +236,7 @@ describe('MilestoneRail settings personalization (B-design #6)', () => {
     expect(railRoot().style.width).toBe('28px')
 
     openSettings()
+    expandPersonal()
     const slider = document.querySelector<HTMLInputElement>('input[data-icon-size]')!
     fireEvent.change(slider, { target: { value: '32' } })
     expect(document.querySelector('[data-icon-size-value]')!.textContent).toBe('32px')
@@ -231,6 +253,7 @@ describe('MilestoneRail settings personalization (B-design #6)', () => {
   it('the edge-distance slider repositions the rail and persists (replaces RAIL_INSET)', () => {
     const { backing } = renderSettingsRail()
     openSettings()
+    expandPersonal()
 
     const slider = document.querySelector<HTMLInputElement>('input[data-inset]')!
     fireEvent.change(slider, { target: { value: '6' } })
@@ -255,6 +278,7 @@ describe('MilestoneRail settings personalization (B-design #6)', () => {
   it('side=left: the rail hugs the left edge and floating layers open to its RIGHT (other side)', () => {
     const { backing } = renderSettingsRail()
     openSettings()
+    expandPersonal()
 
     fireEvent.click(document.querySelector<HTMLInputElement>('[data-side-radio][value="left"]')!)
     expect(railRoot()).toHaveAttribute('data-side', 'left')
@@ -283,5 +307,139 @@ describe('MilestoneRail settings personalization (B-design #6)', () => {
     fireEvent.click(document.querySelector<HTMLElement>('[data-update-check]')!)
     const panel = document.querySelector<HTMLElement>('[data-update-panel]')!
     expect(panel.style.right).toBe(`${window.innerWidth - (14 + 28 + 8 + 280)}px`)
+  })
+
+  it('the personalization block defaults COLLAPSED with a live summary; expanding reveals the controls', () => {
+    const { backing } = renderSettingsRail()
+    openSettings()
+
+    const toggle = document.querySelector<HTMLElement>('[data-personal-toggle]')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    // Controls are not rendered while the block is collapsed.
+    expect(document.querySelector('input[data-icon-size]')).toBeNull()
+    expect(document.querySelector('[data-accent-swatch]')).toBeNull()
+    // The header leads with one live value summary (default values).
+    expect(document.querySelector('[data-settings-personal-summary]')!.textContent).toContain('图标 28px')
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(document.querySelector('input[data-icon-size]')).not.toBeNull()
+    expect(document.querySelector('[data-accent-swatch][data-accent="#4d7cfd"]')).not.toBeNull()
+
+    // Adjusting a control updates the summary immediately (即调即存).
+    fireEvent.click(document.querySelector('[data-accent-swatch][data-accent="#22c55e"]')!)
+    expect(document.querySelector('[data-settings-personal-summary]')!.textContent).toContain('#22c55e')
+    expect(storedPrefs(backing).accent).toBe('#22c55e')
+
+    // Collapsing again unmounts the controls but keeps the updated summary.
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('input[data-icon-size]')).toBeNull()
+    expect(document.querySelector('[data-settings-personal-summary]')!.textContent).toContain('#22c55e')
+  })
+})
+
+describe('MilestoneRail settings — focus block (0.6.3 focus mix)', () => {
+  it('defaults COLLAPSED with a live summary; expanding reveals the options and the strength slider', () => {
+    const { backing } = renderSettingsRail()
+    openSettings()
+
+    const toggle = document.querySelector<HTMLElement>('[data-focus-toggle-settings]')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    // Controls are not rendered while the block is collapsed.
+    expect(document.querySelector('[data-focus-dim-think]')).toBeNull()
+    expect(document.querySelector('[data-focus-opacity]')).toBeNull()
+    // The header leads with one live value summary (defaults: think dim 40%).
+    expect(document.querySelector('[data-focus-summary]')!.textContent).toBe('think 淡化 · 强度 40%')
+
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    const dimThink = document.querySelector<HTMLInputElement>('[data-focus-dim-think]')!
+    expect(dimThink).not.toBeNull()
+    expect(dimThink.checked).toBe(true)
+    const dimTools = document.querySelector<HTMLInputElement>('[data-focus-dim-tools]')!
+    expect(dimTools.checked).toBe(false)
+    const collapseThink = document.querySelector<HTMLInputElement>('[data-focus-collapse-think]')!
+    expect(collapseThink.checked).toBe(false)
+    const slider = document.querySelector<HTMLInputElement>('input[data-focus-opacity]')!
+    expect(slider.value).toBe('0.4')
+    expect(document.querySelector('[data-focus-opacity-value]')!.textContent).toBe('40%')
+
+    // Adjusting a control updates the summary immediately (即调即存).
+    fireEvent.click(dimTools)
+    expect(document.querySelector('[data-focus-summary]')!.textContent).toBe('think 淡化 · 工具淡化 · 强度 40%')
+    expect(storedPrefs(backing).focus.dimTools).toBe(true)
+
+    // Collapsing again unmounts the controls but keeps the updated summary.
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(document.querySelector('[data-focus-dim-think]')).toBeNull()
+    expect(document.querySelector('[data-focus-summary]')!.textContent).toBe('think 淡化 · 工具淡化 · 强度 40%')
+  })
+
+  it('every focus control writes through to the persisted blob (mixed recipe)', () => {
+    const { backing } = renderSettingsRail()
+    openSettings()
+    expandFocus()
+
+    fireEvent.click(document.querySelector<HTMLInputElement>('[data-focus-dim-think]')!)
+    fireEvent.click(document.querySelector<HTMLInputElement>('[data-focus-dim-tools]')!)
+    fireEvent.click(document.querySelector<HTMLInputElement>('[data-focus-collapse-think]')!)
+    const slider = document.querySelector<HTMLInputElement>('input[data-focus-opacity]')!
+    fireEvent.change(slider, { target: { value: '0.3' } })
+
+    // Value display follows the slider.
+    expect(document.querySelector('[data-focus-opacity-value]')!.textContent).toBe('30%')
+
+    const stored = storedPrefs(backing)
+    expect(stored.focus).toEqual({
+      dimThink: false,
+      dimTools: true,
+      collapseThink: true,
+      opacity: 0.3,
+    })
+    // The summary reads the mixed recipe: 工具淡化 · 折叠 think · 强度 30%.
+    expect(document.querySelector('[data-focus-summary]')!.textContent).toBe('工具淡化 · 折叠 think · 强度 30%')
+    // Unrelated prefs stayed untouched.
+    expect(stored.accent).toBe('#4d7cfd')
+  })
+
+  it('seeding a custom focus mix in the blob hydrates the block and its summary', () => {
+    renderSettingsRail({
+      prefs: JSON.stringify({
+        ...DEFAULT_PREFS,
+        focus: { dimThink: false, dimTools: true, collapseThink: false, opacity: 0.2 },
+      }),
+    })
+    openSettings()
+
+    expect(document.querySelector('[data-focus-summary]')!.textContent).toBe('工具淡化 · 强度 20%')
+
+    expandFocus()
+    expect(document.querySelector<HTMLInputElement>('[data-focus-dim-think]')!.checked).toBe(false)
+    expect(document.querySelector<HTMLInputElement>('[data-focus-dim-tools]')!.checked).toBe(true)
+    expect(document.querySelector<HTMLInputElement>('input[data-focus-opacity]')!.value).toBe('0.2')
+  })
+
+  it('恢复默认 resets the focus mix together with pins and appearance', () => {
+    const { backing } = renderSettingsRail({
+      prefs: JSON.stringify({
+        ...DEFAULT_PREFS,
+        pinned: ['focus'],
+        iconSize: 32,
+        focus: { dimThink: true, dimTools: true, collapseThink: true, opacity: 0.8 },
+      }),
+    })
+    openSettings()
+    expandFocus()
+
+    fireEvent.click(document.querySelector<HTMLElement>('[data-toolbar-settings-reset]')!)
+
+    expect(document.querySelector<HTMLInputElement>('[data-focus-dim-think]')!.checked).toBe(true)
+    expect(document.querySelector<HTMLInputElement>('[data-focus-dim-tools]')!.checked).toBe(false)
+    expect(document.querySelector<HTMLInputElement>('[data-focus-collapse-think]')!.checked).toBe(false)
+    expect(document.querySelector<HTMLInputElement>('input[data-focus-opacity]')!.value).toBe('0.4')
+    expect(document.querySelector('[data-focus-summary]')!.textContent).toBe('think 淡化 · 强度 40%')
+    expect(backing.get(TOOLBAR_PREFS_KEY)).toBe(JSON.stringify(DEFAULT_PREFS))
   })
 })

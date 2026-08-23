@@ -23,6 +23,7 @@ import {
   savePrefs,
   togglePin,
   clampStep,
+  DEFAULT_FOCUS_PREFS,
 } from './toolbar-prefs.ts'
 import type { ToolbarPinId, ToolbarPrefs } from './toolbar-prefs.ts'
 
@@ -137,6 +138,79 @@ describe('toolbar-prefs parsePrefs — personalization sanitization', () => {
   })
 })
 
+describe('toolbar-prefs parsePrefs — focus mix sanitization (0.6.3)', () => {
+  it('defaults: dimThink on, dimTools/collapseThink off, opacity 0.4', () => {
+    expect(parsePrefs(null).focus).toEqual(DEFAULT_FOCUS_PREFS)
+    expect(parsePrefs(blob({})).focus).toEqual(DEFAULT_FOCUS_PREFS)
+  })
+
+  it('an OLD pre-0.6.3 blob (no focus field) gains the default focus mix', () => {
+    const legacy = JSON.stringify({ pinned: ['search', 'focus'] })
+    const parsed = parsePrefs(legacy)
+    expect(parsed.focus).toEqual(DEFAULT_FOCUS_PREFS)
+    expect(parsed.pinned).toEqual(['search', 'focus'])
+  })
+
+  it('accepts real booleans; invalid flag values fall back per-field', () => {
+    const good = parsePrefs(
+      blob({ focus: { dimThink: false, dimTools: true, collapseThink: true, opacity: 0.5 } }),
+    )
+    expect(good.focus).toEqual({ dimThink: false, dimTools: true, collapseThink: true, opacity: 0.5 })
+
+    const bad = parsePrefs(
+      blob({
+        focus: { dimThink: 'on' as unknown as boolean, dimTools: 1 as unknown as boolean, collapseThink: null as unknown as boolean, opacity: 0.5 },
+      }),
+    )
+    expect(bad.focus).toEqual({ dimThink: true, dimTools: false, collapseThink: false, opacity: 0.5 })
+  })
+
+  it('opacity snaps to the 0.1 step and clamps to [0.2, 0.8]', () => {
+    const withOpacity = (opacity: number) => blob({ focus: { ...DEFAULT_FOCUS_PREFS, opacity } })
+    expect(parsePrefs(withOpacity(0.3)).focus.opacity).toBe(0.3)
+    expect(parsePrefs(withOpacity(0.26)).focus.opacity).toBe(0.3)
+    expect(parsePrefs(withOpacity(0.84)).focus.opacity).toBe(0.8)
+    expect(parsePrefs(withOpacity(0.1)).focus.opacity).toBe(0.2)
+    expect(parsePrefs(withOpacity(1)).focus.opacity).toBe(0.8)
+    expect(parsePrefs(withOpacity(NaN)).focus.opacity).toBe(0.4)
+    expect(parsePrefs(withOpacity(0.30000000000000004)).focus.opacity).toBe(0.3)
+  })
+
+  it('a non-number opacity string falls back to the default strength', () => {
+    const weird = JSON.stringify({
+      ...DEFAULT_PREFS,
+      focus: { ...DEFAULT_FOCUS_PREFS, opacity: 'soft' },
+    })
+    expect(parsePrefs(weird).focus.opacity).toBe(0.4)
+  })
+
+  it('a non-object focus field degrades to the default focus mix', () => {
+    expect(parsePrefs(blob({ focus: 'dim' as unknown as ToolbarPrefs['focus'] })).focus).toEqual(
+      DEFAULT_FOCUS_PREFS,
+    )
+    const numeric = JSON.stringify({ ...DEFAULT_PREFS, focus: 42 })
+    expect(parsePrefs(numeric).focus).toEqual(DEFAULT_FOCUS_PREFS)
+  })
+
+  it('other fields survive a focus-bearing blob and the focus mix keeps its own values', () => {
+    const parsed = parsePrefs(
+      blob({
+        focus: { dimThink: false, dimTools: true, collapseThink: true, opacity: 0.7 },
+        accent: '#22c55e',
+      }),
+    )
+    expect(parsed.accent).toBe('#22c55e')
+    expect(parsed.focus).toEqual({ dimThink: false, dimTools: true, collapseThink: true, opacity: 0.7 })
+  })
+
+  it('savePrefs writes the sanitized focus mix and reset restores the defaults', () => {
+    savePrefs({ ...DEFAULT_PREFS, focus: { dimThink: false, dimTools: true, collapseThink: true, opacity: 0.74 } })
+    expect(loadPrefs().focus).toEqual({ dimThink: false, dimTools: true, collapseThink: true, opacity: 0.7 })
+    savePrefs(DEFAULT_PREFS)
+    expect(loadPrefs().focus).toEqual(DEFAULT_FOCUS_PREFS)
+  })
+})
+
 describe('toolbar-prefs clampStep', () => {
   it('snaps finite values to the step within [min, max]; anything else falls back', () => {
     expect(clampStep(24, 20, 36, 2, 28)).toBe(24)
@@ -189,6 +263,7 @@ describe('toolbar-prefs localStorage round-trip', () => {
       inset: 8,
       side: 'left',
       locale: 'en',
+      focus: { dimThink: true, dimTools: true, collapseThink: true, opacity: 0.6 },
     }
     savePrefs(prefs)
     expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify(prefs))

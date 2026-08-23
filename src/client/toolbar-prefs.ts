@@ -8,11 +8,15 @@
  * JSON object:
  *
  *   { "pinned": string[], "accent": "#rrggbb", "iconSize": number,
- *     "inset": number, "side": "left" | "right", "locale": "system"|"zh"|"en" }
+ *     "inset": number, "side": "left" | "right", "locale": "system"|"zh"|"en",
+ *     "focus": { "dimThink": boolean, "dimTools": boolean,
+ *                "collapseThink": boolean, "opacity": number } }
  *
  * Backward compatibility: the pre-personalization blob `{ "pinned": string[] }`
  * (and an entirely absent value) parses to the DEFAULT prefs with the new
- * fields at their defaults — old users keep their pins untouched.
+ * fields at their defaults — old users keep their pins untouched. The same
+ * rule covers the `focus` object: a blob stored before 0.6.3 (no `focus`
+ * field) gains the default focus mix.
  *
  * All reads are sanitized per field:
  *   - `pinned`: whitelisted ids only (`TOOLBAR_PIN_IDS`), duplicates dropped,
@@ -21,7 +25,10 @@
  *     back to the default blue;
  *   - `iconSize` / `inset`: finite numbers snapped to the slider step
  *     (even values) and clamped to the slider range;
- *   - `side`: exactly `'left'` or `'right'`.
+ *   - `side`: exactly `'left'` or `'right'`;
+ *   - `focus`: three booleans (`dimThink` / `dimTools` / `collapseThink`)
+ *     defaulting to `true` / `false` / `false`, plus the dim `opacity`
+ *     snapped to the 0.1 step and clamped to [0.2, 0.8].
  *
  * The whitelist lives HERE (not in MilestoneRail) so the pure functions stay
  * dependency-free and unit-testable; MilestoneRail's feature registry keys
@@ -58,6 +65,22 @@ export type RailSide = 'left' | 'right'
 /** Rail copy language: 'system' follows the harness UI language; 'zh'/'en' force the plugin's own dictionaries. */
 export type RailLocalePref = 'system' | 'zh' | 'en'
 
+/**
+ * 0.6.3 focus-mode mix (聚焦搭配): which content classes the focus master
+ * switch dims/collapses, and at what strength. Lives in the prefs blob so the
+ * settings modal's focused controls persist exactly like the rest.
+ */
+export interface FocusPrefs {
+  /** Dim the harness's thinking disclosures (`[data-variant="think"]`). */
+  readonly dimThink: boolean
+  /** Dim the harness's tool-call cards (`[data-chat-call-id]`, see buildFocusCss). */
+  readonly dimTools: boolean
+  /** Compress think disclosures to a hover-expanding strip (pure CSS). */
+  readonly collapseThink: boolean
+  /** Dim strength for every "dim" rule — 0.2..0.8, step 0.1 (20%..80%). */
+  readonly opacity: number
+}
+
 /** The full persisted toolbar preference set. */
 export interface ToolbarPrefs {
   /** Feature ids kept visible while the toolbar is COLLAPSED. */
@@ -72,6 +95,8 @@ export interface ToolbarPrefs {
   readonly side: RailSide
   /** Rail copy language: follow the harness locale, or force zh/en. */
   readonly locale: RailLocalePref
+  /** 0.6.3 focus-mode mix (dim/collapse which content, at what strength). */
+  readonly focus: FocusPrefs
 }
 
 /** The default accent (the classic milestone blue). */
@@ -85,6 +110,18 @@ export const ICON_SIZE_STEP = 2
 export const INSET_MIN = 0
 export const INSET_MAX = 40
 export const INSET_STEP = 2
+/** Slider domain for the focus dim strength (0.2 = 20% .. 0.8 = 80%). */
+export const FOCUS_OPACITY_MIN = 0.2
+export const FOCUS_OPACITY_MAX = 0.8
+export const FOCUS_OPACITY_STEP = 0.1
+
+/** The canonical default focus mix (dim think at 40%; tools/collapse off). */
+export const DEFAULT_FOCUS_PREFS: FocusPrefs = {
+  dimThink: true,
+  dimTools: false,
+  collapseThink: false,
+  opacity: 0.4,
+}
 
 /** The canonical default prefs ("恢复默认" target; also the read fallback). */
 export const DEFAULT_PREFS: ToolbarPrefs = {
@@ -94,6 +131,7 @@ export const DEFAULT_PREFS: ToolbarPrefs = {
   inset: 14,
   side: 'right',
   locale: 'system',
+  focus: { ...DEFAULT_FOCUS_PREFS },
 }
 
 /** Type guard for registry ids — unknown strings never survive a parse. */
@@ -133,11 +171,41 @@ export function clampStep(
   return Math.min(max, Math.max(min, snapped))
 }
 
+/** Boolean sanitizer for the focus mix flags: only `true`/`false` survive. */
+function sanitizeBoolean(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+/**
+ * Focus-mix sanitizer: `dimTools`/`collapseThink` default off, `dimThink`
+ * defaults ON (the classic pre-0.6.3 behavior), and `opacity` snaps to the
+ * 0.1 step inside [0.2, 0.8]. Snapping works in tenths (step × 10 = integer)
+ * instead of a raw division so hand-edited floats like `0.30000000000000004`
+ * always converge on exactly `0.3`.
+ */
+export function sanitizeFocus(raw: unknown): FocusPrefs {
+  if (typeof raw !== 'object' || raw === null) return { ...DEFAULT_FOCUS_PREFS }
+  const { dimThink, dimTools, collapseThink, opacity } = raw as Record<string, unknown>
+  const clamped =
+    typeof opacity === 'number' && Number.isFinite(opacity)
+      ? Math.min(FOCUS_OPACITY_MAX, Math.max(FOCUS_OPACITY_MIN, opacity))
+      : DEFAULT_FOCUS_PREFS.opacity
+  const tenths = Math.round(clamped * 10)
+  const snapped = Math.min(FOCUS_OPACITY_MAX, Math.max(FOCUS_OPACITY_MIN, tenths / 10))
+  return {
+    dimThink: sanitizeBoolean(dimThink, DEFAULT_FOCUS_PREFS.dimThink),
+    dimTools: sanitizeBoolean(dimTools, DEFAULT_FOCUS_PREFS.dimTools),
+    collapseThink: sanitizeBoolean(collapseThink, DEFAULT_FOCUS_PREFS.collapseThink),
+    opacity: snapped,
+  }
+}
+
 /**
  * Parse + sanitize the raw persisted blob: `null` (nothing stored), invalid
  * JSON, or a non-object shape all degrade to the DEFAULT prefs. Each field is
  * sanitized independently, so a half-corrupt blob keeps its valid parts
- * (e.g. an old `{pinned}`-only blob gains the default accent/size/inset/side).
+ * (e.g. an old `{pinned}`-only blob gains the default accent/size/inset/side
+ * AND the default focus mix).
  */
 export function parsePrefs(raw: string | null): ToolbarPrefs {
   if (raw === null) return { ...DEFAULT_PREFS }
@@ -148,7 +216,7 @@ export function parsePrefs(raw: string | null): ToolbarPrefs {
     return { ...DEFAULT_PREFS }
   }
   if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_PREFS }
-  const { pinned, accent, iconSize, inset, side, locale } = parsed as Record<string, unknown>
+  const { pinned, accent, iconSize, inset, side, locale, focus } = parsed as Record<string, unknown>
   return {
     pinned: sanitizePinned(pinned),
     accent:
@@ -159,6 +227,7 @@ export function parsePrefs(raw: string | null): ToolbarPrefs {
     inset: clampStep(inset, INSET_MIN, INSET_MAX, INSET_STEP, DEFAULT_PREFS.inset),
     side: side === 'left' || side === 'right' ? side : DEFAULT_PREFS.side,
     locale: locale === 'zh' || locale === 'en' || locale === 'system' ? locale : DEFAULT_PREFS.locale,
+    focus: sanitizeFocus(focus),
   }
 }
 

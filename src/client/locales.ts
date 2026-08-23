@@ -103,6 +103,8 @@ export const zh = {
   'settings.title': '设置',
   /** Per-feature toggle label inside the settings menu: keep visible while collapsed. */
   'settings.pin': '在折叠外显示',
+  /** Settings: feature-section hint explaining what the pin switch does. */
+  'settings.pin.hint': '开启后，工具栏折叠时该功能仍显示在箭头旁',
   /** Settings action that clears every pinned feature. */
   'settings.reset': '恢复默认',
   /** Settings footer heading above the project links. */
@@ -123,6 +125,16 @@ export const zh = {
   'settings.section.features': '功能与快捷区',
   /** Settings modal: section heading for the personalization controls. */
   'settings.section.personal': '个性化',
+  /** Settings modal: section heading for the focus-mode controls (0.6.3). */
+  'settings.section.focus': '聚焦',
+  /** Settings: personalization-section hint shown inside the expanded block. */
+  'settings.personal.hint': '圆点、强调色与位置，即调即存',
+  /** Settings: aria-label on the personalization block toggle while COLLAPSED. */
+  'settings.personal.expand': '展开个性化设置',
+  /** Settings: aria-label on the personalization block toggle while EXPANDED. */
+  'settings.personal.collapse': '收起个性化设置',
+  /** Settings: live value summary on the collapsed personalization header. */
+  'settings.personal.summary': '{accent} · 图标 {icon}px · {side}',
   /** Settings: hover description — in-rail search. */
   'settings.desc.search': '按完整消息内容过滤并跳转到对应消息',
   /** Settings: hover description — all-prompts list. */
@@ -151,6 +163,30 @@ export const zh = {
   'settings.side.left': '左侧',
   /** Settings personalization: side radio — hug the right edge. */
   'settings.side.right': '右侧',
+  /** Settings: focus block — hint shown inside the expanded block. */
+  'settings.focus.hint': '这些选项自由组合成你的「聚焦搭配」；总开关仍是工具栏的眼睛按钮',
+  /** Settings: aria-label on the focus block toggle while COLLAPSED. */
+  'settings.focus.expand': '展开聚焦设置',
+  /** Settings: aria-label on the focus block toggle while EXPANDED. */
+  'settings.focus.collapse': '收起聚焦设置',
+  /** Settings: focus option — dim the think reasoning disclosures. */
+  'settings.focus.dimThink': '淡化 think 推理区',
+  /** Settings: focus option — dim the tool-call cards. */
+  'settings.focus.dimTools': '淡化工具调用卡片',
+  /** Settings: focus option — compress think disclosures to a hover strip. */
+  'settings.focus.collapseThink': '折叠 think',
+  /** Settings: focus option — dim strength slider label. */
+  'settings.focus.opacity': '淡化强度',
+  /** Settings: live value summary on the collapsed focus header. */
+  'settings.focus.summary': '{opts} · 强度 {opacity}%',
+  /** Settings: focus summary — short label for the think-dim option. */
+  'settings.focus.summary.think': 'think 淡化',
+  /** Settings: focus summary — short label for the tool-dim option. */
+  'settings.focus.summary.tools': '工具淡化',
+  /** Settings: focus summary — short label for the think-collapse option. */
+  'settings.focus.summary.collapse': '折叠 think',
+  /** Settings: focus summary — placeholder when every option is off. */
+  'settings.focus.summary.none': '未启用',
   /** B4 update-check: toolbar button label + title/aria-label. */
   'update.check': '检查更新',
   /** B4 update-check: popover title. */
@@ -232,6 +268,7 @@ export const en: Record<MilestoneKey, string> = {
   'toolbar.settings.close': 'Close settings',
   'settings.title': 'Settings',
   'settings.pin': 'Show outside collapse',
+  'settings.pin.hint': 'When on, the feature stays beside the arrow while the toolbar is folded',
   'settings.reset': 'Restore defaults',
   'settings.support': 'Support us',
   'settings.repo': 'GitHub repo',
@@ -242,6 +279,11 @@ export const en: Record<MilestoneKey, string> = {
   'settings.close': 'Close',
   'settings.section.features': 'Features & Shortcuts',
   'settings.section.personal': 'Personalization',
+  'settings.section.focus': 'Focus',
+  'settings.personal.hint': 'Dot size, accent color, and position — saved as you adjust',
+  'settings.personal.expand': 'Expand personalization',
+  'settings.personal.collapse': 'Collapse personalization',
+  'settings.personal.summary': '{accent} · Icon {icon}px · {side}',
   'settings.desc.search': 'Filter by full message text and jump to the match',
   'settings.desc.list': 'Overview of every prompt in this session',
   'settings.desc.sessionSearch': 'Search across all sessions',
@@ -256,6 +298,18 @@ export const en: Record<MilestoneKey, string> = {
   'settings.side': 'Position',
   'settings.side.left': 'Left',
   'settings.side.right': 'Right',
+  'settings.focus.hint': 'Combine these options into your own focus recipe; the eye button on the toolbar stays the master switch',
+  'settings.focus.expand': 'Expand focus settings',
+  'settings.focus.collapse': 'Collapse focus settings',
+  'settings.focus.dimThink': 'Dim think reasoning',
+  'settings.focus.dimTools': 'Dim tool call cards',
+  'settings.focus.collapseThink': 'Collapse think',
+  'settings.focus.opacity': 'Dim strength',
+  'settings.focus.summary': '{opts} · Strength {opacity}%',
+  'settings.focus.summary.think': 'Think dim',
+  'settings.focus.summary.tools': 'Tools dim',
+  'settings.focus.summary.collapse': 'Think collapse',
+  'settings.focus.summary.none': 'Off',
   'update.check': 'Check updates',
   'update.title': 'Update check',
   'update.current': 'Current version',

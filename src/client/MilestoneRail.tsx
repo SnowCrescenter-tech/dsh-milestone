@@ -63,7 +63,7 @@ import type { SearchSessionsFn } from './MilestoneSessionSearch.tsx'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
 import { DEFAULT_PREFS, loadPrefs, savePrefs, togglePin } from './toolbar-prefs.ts'
-import type { RailSide, ToolbarPinId, ToolbarPrefs } from './toolbar-prefs.ts'
+import type { FocusPrefs, RailSide, ToolbarPinId, ToolbarPrefs } from './toolbar-prefs.ts'
 import { lighten, rgbaString } from './accent-utils'
 import { loadCachedLatest, needsUpdate, SUPPORTED_HOST_LINES } from './version-logic.ts'
 import { PLUGIN_NPM_URL, PLUGIN_REPO_URL, PLUGIN_VERSION } from './version-meta.ts'
@@ -131,39 +131,185 @@ const PANEL_WIDTH_STANDARD = 280
 /** Tooltip anchor width: its maxWidth cap, so a tooltip never overlaps the rail. */
 const TOOLTIP_ANCHOR_WIDTH = 300
 /**
- * P3 focus mode: dims the harness's AI thinking/scratchpad blocks so the
- * conversation reads cleaner. The rule targets the stable, un-hashed
- * `data-variant="think"` attribute on the thinking-block ROOT (the harness
- * renders it as `data-variant="think"` with `data-state="running|ok"`), so an
- * overlay plugin can dim it with plain CSS. Hovering a dimmed block (or
- * opening it, `[data-open]`) restores full opacity. Kept in an inline
- * <style> so the plugin stays zero-asset.
+ * P3 focus mode (0.6.3: user-tuned "聚焦搭配"): when the eye toggle is armed,
+ * an inline <style> (zero-asset, same pattern as the original FOCUS_CSS)
+ * dims/collapses the harness content classes the USER opted into, at the
+ * strength the user picked. Which content to dim and whether to additionally
+ * collapse think is a persisted `prefs.focus` mix; the master on/off switch
+ * stays the toolbar eye button.
+ *
+ * STABLE SELECTORS — researched against the rc.2 official build products:
+ *
+ *  - think: `dsh-client-ui-conversation` renders every assistant reasoning
+ *    disclosure as a root `div[data-variant="think"][data-state="running|ok"]`
+ *    (ReasoningRow). The reasoning body lives INSIDE that root — the
+ *    DisclosureRow's children — so the root is a single clampable container:
+ *    CSS `max-height` + `overflow: hidden` collapses exactly the body while
+ *    the header row ("Think · summary") stays visible. → collapseThink is
+ *    feasible with pure CSS (no JS, no harness-internal interaction).
+ *
+ *  - tool calls: `dsh-client-ui-tool` wraps EVERY atomic call (all ToolRow
+ *    presentation variants AND the bash-sample row) in
+ *    `div[data-chat-call-id]` (with `data-chat-anchor-key="call:<callId>"`);
+ *    no other card type in the harness uses that attribute (verified across
+ *    the whole @deepseek-ai install). → `[data-chat-call-id]` is the stable,
+ *    variant-independent tool-call-card selector.
+ *
+ * Hover/open restore mirrors the classic rule: `:hover` restores, and the
+ * DisclosureRow inside the collapsed target sets `[data-open]` when the user
+ * opens it (the DESCENDANT form `target [data-open]` is required — same as
+ * pre-0.6.3). The collapse strip releases on hover AND on `[data-open]` so
+ * an opened think disclosure never stays crushed.
  */
-const FOCUS_CSS = `[data-variant="think"] { opacity: 0.4; transition: opacity 0.2s; }
-[data-variant="think"]:hover, [data-variant="think"] [data-open] { opacity: 1; }`
+export const FOCUS_SELECTOR_THINK = '[data-variant="think"]'
+export const FOCUS_SELECTOR_TOOL = '[data-chat-call-id]'
+/** Collapsed think strip height (px) — roughly one header line. */
+export const FOCUS_THINK_STRIP_HEIGHT = 36
+/** Restored height when hovering/opening a collapsed think disclosure. */
+export const FOCUS_THINK_MAX_HEIGHT = '78vh'
+
 /**
- * Static settings-modal styling that needs `:hover` (which inline styles
- * cannot express): the support-us card grid (micro-lift + accent highlight)
- * and the pin-row hover wash. Accent values come from the rail root's CSS
- * variables (`--ms-accent`), so one block serves every accent. The
+ * Compose the focus-mode stylesheet from the persisted focus mix. Pure —
+ * exported so unit tests can pin the exact rule text. `''` when no option is
+ * armed (the master switch simply injects nothing).
+ */
+export function buildFocusCss(focus: FocusPrefs): string {
+  const { dimThink, dimTools, collapseThink } = focus
+  const strength = focus.opacity.toFixed(1)
+  const rules: string[] = []
+  if (dimThink || collapseThink) {
+    const decls: string[] = []
+    if (dimThink) decls.push(`opacity: ${strength}`)
+    if (collapseThink) {
+      decls.push(`max-height: ${FOCUS_THINK_STRIP_HEIGHT}px`, 'overflow: hidden')
+    }
+    rules.push(
+      `${FOCUS_SELECTOR_THINK} { ${decls.join('; ')}; transition: opacity 0.2s${collapseThink ? ', max-height 0.2s' : ''}; }`,
+    )
+    rules.push(
+      `${FOCUS_SELECTOR_THINK}:hover, ${FOCUS_SELECTOR_THINK} [data-open] { opacity: 1;${collapseThink ? ` max-height: ${FOCUS_THINK_MAX_HEIGHT};` : ''} }`,
+    )
+  }
+  if (dimTools) {
+    rules.push(`${FOCUS_SELECTOR_TOOL} { opacity: ${strength}; transition: opacity 0.2s; }`)
+    rules.push(`${FOCUS_SELECTOR_TOOL}:hover, ${FOCUS_SELECTOR_TOOL} [data-open] { opacity: 1; }`)
+  }
+  return rules.join('\n')
+}
+/**
+ * Settings modal shared palette + geometry — one source for the inline
+ * styles AND the static MODAL_CSS block below so they cannot drift. Dark
+ * panel on a dark host, three text tiers (primary / section title / hint +
+ * muted), one border tone, a 12px panel / 8px control radius scale and a
+ * 4-unit spacing scale (4 / 8 / 12 / 16 / 20).
+ */
+const MODAL_BG = 'rgba(20, 24, 32, 0.98)'
+const MODAL_FG = '#e6e8ee'
+const MODAL_TITLE = '#c7cede'
+const MODAL_TEXT = '#b9c2d4'
+const MODAL_HINT = '#8b96ab'
+const MODAL_BORDER = 'rgba(255, 255, 255, 0.14)'
+const MODAL_TIP_BG = '#222834'
+const MODAL_RADIUS_PANEL = 12
+const MODAL_RADIUS_CONTROL = 8
+/** Near-row description tip: how far its right edge sits from the row's right
+ * edge — clears the 32px switch + its 10px padding. */
+const MODAL_TIP_RIGHT = 54
+/**
+ * Static settings-modal styling that needs `:hover`/`:focus-visible` (which
+ * inline styles cannot express): the support-us card grid (micro-lift +
+ * accent highlight), the pin-row / personal-header hover washes, one accent
+ * focus ring for every modal control, the near-row tip's little arrow, the
+ * personalization body's reveal, and a themed thin scrollbar. Accent values
+ * come from the rail root's CSS variables (`--ms-accent*`), so one block
+ * serves every accent. Inline styles keep these elements background-free
+ * (except where noted) so the `:hover` washes below actually win. The
  * search-toggle recolor rule makes the EXTERNAL RailSearchUi chrome follow
  * the accent too (that file is owned by an earlier phase and cannot change);
- * `!important` is required because the toggle's own inline styles win
+ * `!important` is required because that toggle's own inline styles win
  * otherwise.
  */
 const MODAL_CSS = `
 [data-support-card] {
   display: flex; align-items: center; justify-content: center; gap: 8px;
   padding: 10px 12px; border-radius: 8px;
-  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05); border: 1px solid ${MODAL_BORDER};
   color: #c7cede; text-decoration: none; font-size: 12.5px; line-height: 1.4;
   transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
 }
 [data-support-card]:hover { transform: translateY(-2px); border-color: var(--ms-accent); background: rgba(255, 255, 255, 0.09); }
+/* Row and header washes (the inline styles deliberately leave backgrounds
+   unset so these rules win over the default padding-box background). */
 [data-toolbar-pin-toggle]:hover, [data-toolbar-pin-toggle]:focus-visible { background: rgba(255, 255, 255, 0.06); }
+[data-personal-toggle]:hover, [data-focus-toggle-settings]:hover { background: rgba(255, 255, 255, 0.05); }
+[data-focus-option]:hover { background: rgba(255, 255, 255, 0.04); }
+[data-toolbar-settings-close]:hover { background: rgba(255, 255, 255, 0.08); }
+[data-toolbar-settings-reset] { background: rgba(255, 255, 255, 0.06); }
+[data-toolbar-settings-reset]:hover { background: rgba(255, 255, 255, 0.1); }
+/* ONE accent ring for keyboard focus on every modal control. */
+[data-toolbar-pin-toggle]:focus-visible, [data-personal-toggle]:focus-visible,
+[data-focus-toggle-settings]:focus-visible,
+[data-toolbar-settings-close]:focus-visible, [data-toolbar-settings-reset]:focus-visible {
+  box-shadow: 0 0 0 2px var(--ms-accent-soft);
+}
+/* Near-row description tip: a rotated square peeks out of the LEFT edge so
+   the apex points back at the row's label. */
+[data-settings-tip]::before {
+  content: ''; position: absolute; left: -3px; top: 50%;
+  width: 7px; height: 7px; transform: translateY(-50%) rotate(45deg);
+  background: ${MODAL_TIP_BG};
+  border-left: 1px solid ${MODAL_BORDER};
+  border-bottom: 1px solid ${MODAL_BORDER};
+}
+/* Tip + chevron motion lives here (not inline) so reduced-motion can kill it. */
+[data-settings-tip] { transition: opacity 140ms ease, transform 140ms ease, visibility 140ms; }
+[data-personal-toggle] svg, [data-focus-toggle-settings] svg { transition: transform 150ms ease; }
+/* One authored reveal: the personalization/focus bodies fade in on expand. */
+@keyframes ms-settings-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+[data-settings-personal-body], [data-settings-focus-body] { animation: ms-settings-fade 140ms ease; }
+/* Thin themed scrollbar for the scrollable modal panel. */
+[data-toolbar-settings-panel]::-webkit-scrollbar { width: 10px; }
+[data-toolbar-settings-panel]::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16); border-radius: 6px; border: 3px solid transparent; background-clip: padding-box;
+}
+[data-toolbar-settings-panel]::-webkit-scrollbar-track { background: transparent; }
+@media (prefers-reduced-motion: reduce) {
+  [data-settings-tip], [data-personal-toggle] svg, [data-focus-toggle-settings] svg, [data-support-card] { transition: none; }
+  [data-settings-personal-body], [data-settings-focus-body] { animation: none; }
+}
 [data-search-toggle] { color: #8b96ab !important; }
 [data-search-toggle][aria-pressed="true"] { background: var(--ms-accent-bg) !important; color: var(--ms-accent-soft) !important; }
 `
+/**
+ * Shared collapsible-section chrome (personalization + focus blocks): the
+ * header button (chevron + title + live summary) and the summary text span.
+ * One source so the two settings blocks cannot drift.
+ */
+const SECTION_TOGGLE_STYLE: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  width: '100%',
+  padding: '8px 10px',
+  border: 'none',
+  borderRadius: MODAL_RADIUS_CONTROL,
+  cursor: 'pointer',
+  color: MODAL_TITLE,
+  fontSize: 13,
+  fontWeight: 600,
+  textAlign: 'left',
+}
+const SECTION_SUMMARY_STYLE: CSSProperties = {
+  flex: 1,
+  minWidth: 0,
+  textAlign: 'right',
+  fontWeight: 400,
+  fontSize: 12,
+  color: MODAL_HINT,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+}
 /**
  * P3 deep links (`#msg=<anchor-key>`): initial delay before the first
  * deep-link attempt — the harness scrolls the conversation to the bottom on
@@ -436,8 +582,10 @@ export function MilestoneRail({
   const [search, setSearch] = useState<SearchState>({ query: '', activePos: 0, panelOpen: false })
   // T10: bookmarks-only filter — when on, only bookmarked dots render.
   const [bookmarksOnly, setBookmarksOnly] = useState(false)
-  // P3: focus mode — when on, a global rule dims the harness's thinking
-  // blocks (`[data-variant="think"]`); the eye toggle arms/disarms it.
+  // P3: focus mode — when on, a per-preference rule (buildFocusCss over the
+  // persisted focus mix) dims/collapses the harness's thinking blocks
+  // (`[data-variant="think"]`) and/or tool-call cards (`[data-chat-call-id]`);
+  // the eye toggle arms/disarms it.
   const [focusActive, setFocusActive] = useState(false)
   // P3: the expandable all-prompts list panel — when open, the list toggle
   // arms and the fixed panel (MilestoneListPanel) lists every mark.
@@ -569,6 +717,27 @@ export function MilestoneRail({
     })
   }
 
+  /** 0.6.3: patch ONE focus-mix flag/strength (nested field, same write-through). */
+  const updateFocus = (patch: Partial<FocusPrefs>): void => {
+    updatePrefs({ focus: { ...prefs.focus, ...patch } })
+  }
+
+  /**
+   * 0.6.3: the focus block's live summary — the armed options joined into a
+   * "聚焦搭配" line, plus the strength percentage. e.g. `think 淡化 · 强度 40%`.
+   */
+  const focusSummary = (() => {
+    const parts = [
+      prefs.focus.dimThink ? t('settings.focus.summary.think') : null,
+      prefs.focus.dimTools ? t('settings.focus.summary.tools') : null,
+      prefs.focus.collapseThink ? t('settings.focus.summary.collapse') : null,
+    ].filter((part): part is string => part !== null)
+    return t('settings.focus.summary', {
+      opts: parts.length > 0 ? parts.join(' · ') : t('settings.focus.summary.none'),
+      opacity: Math.round(prefs.focus.opacity * 100),
+    })
+  })()
+
   /** B1: flip one feature's pin — state and the persisted blob update together. */
   const onTogglePin = (id: ToolbarPinId): void => {
     setPrefs((prev) => {
@@ -594,9 +763,15 @@ export function MilestoneRail({
   const [expandHovered, setExpandHovered] = useState(false)
   const [settingsHovered, setSettingsHovered] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  /** The feature whose description the settings modal's right pane shows
-   * (defaults to the first registry feature — 'search'). */
-  const [descFeature, setDescFeature] = useState<ToolbarPinId>('search')
+  /** The feature whose near-row description tip is currently visible
+   * (`null` = none — tips only appear on hover/focus of their own row). */
+  const [descFeature, setDescFeature] = useState<ToolbarPinId | null>(null)
+  /** B-design: the personalization block collapsess by default so only a
+   * value summary leads the section; expanding reveals the controls. */
+  const [personalOpen, setPersonalOpen] = useState(false)
+  /** B-design (0.6.3): the focus block mirrors the personalization block —
+   * collapsed by default, the header leads with a live option summary. */
+  const [focusOpen, setFocusOpen] = useState(false)
   const settingsRef = useRef<HTMLDivElement>(null)
   const settingsBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -1328,8 +1503,6 @@ export function MilestoneRail({
     '--ms-inset': `${inset}px`,
   } as unknown as CSSProperties
 
-  const descKey = `settings.desc.${descFeature}` as MilestoneKey
-
   return (
     <div
       style={railStyle}
@@ -1341,7 +1514,7 @@ export function MilestoneRail({
       data-inset={String(inset)}
     >
       {pulseCss !== null && <style>{pulseCss}</style>}
-      {focusActive && <style>{FOCUS_CSS}</style>}
+      {focusActive && <style>{buildFocusCss(prefs.focus)}</style>}
       <style>{MODAL_CSS}</style>
       {showLoadOlder && (
         <button
@@ -1437,11 +1610,13 @@ export function MilestoneRail({
               width: 'min(600px, 92vw)',
               maxHeight: '78vh',
               overflowY: 'auto',
-              padding: '16px 18px',
-              background: 'rgba(20, 24, 32, 0.98)',
-              color: '#e6e8ee',
-              borderRadius: 12,
-              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)',
+              padding: 20,
+              background: MODAL_BG,
+              color: MODAL_FG,
+              borderRadius: MODAL_RADIUS_PANEL,
+              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.55)',
+              scrollbarWidth: 'thin',
+              scrollbarColor: 'rgba(255, 255, 255, 0.2) transparent',
             }}
           >
             <div
@@ -1450,10 +1625,10 @@ export function MilestoneRail({
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 8,
-                marginBottom: 12,
+                marginBottom: 18,
               }}
             >
-              <div data-toolbar-settings-title style={{ fontSize: 15, fontWeight: 600, color: '#e6e8ee' }}>
+              <div data-toolbar-settings-title style={{ fontSize: 15, fontWeight: 600, color: MODAL_FG }}>
                 {t('settings.title')}
               </div>
               <button
@@ -1463,59 +1638,80 @@ export function MilestoneRail({
                 title={t('settings.close')}
                 onClick={closeSettings}
                 style={{
-                  width: 26,
-                  height: 26,
+                  width: 28,
+                  height: 28,
                   flexShrink: 0,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  background: 'transparent',
                   border: 'none',
                   padding: 0,
                   cursor: 'pointer',
-                  color: '#8b96ab',
-                  borderRadius: 6,
-                  fontSize: 14,
+                  color: MODAL_HINT,
+                  borderRadius: MODAL_RADIUS_CONTROL,
                   lineHeight: 1,
                 }}
               >
-                ✕
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  aria-hidden="true"
+                >
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </svg>
               </button>
             </div>
 
-            {/* ① 功能与快捷区 — one row per feature with the "show outside
-                collapse" switch; hovering/focusing a row reveals its
-                description in the fixed right pane (chosen over inline
-                expansion: no layout jump, the description is always visible). */}
-            <div data-settings-section style={{ marginBottom: 14 }}>
+            {/* ① 功能与快捷区 — one row per feature with the "show outside collapse"
+                switch. A short hint under the title re-states what the switch
+                does (product: restore the list-header explanation); hovering
+                or focusing a row pops a small description tip NEXT to that
+                row (aria-describedby-linked, absolutely positioned inside the
+                row's own box so it never covers a neighbouring row or scrolls
+                out of the panel). */}
+            <div data-settings-section style={{ marginBottom: 20 }}>
               <div
                 data-settings-section-title
-                style={{ fontSize: 13, fontWeight: 600, color: '#c7cede', marginBottom: 8 }}
+                style={{ fontSize: 13, fontWeight: 600, color: MODAL_TITLE, marginBottom: 4 }}
               >
                 {t('settings.section.features')}
               </div>
               <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) 190px',
-                  gap: 12,
-                  alignItems: 'stretch',
-                }}
+                data-settings-pin-hint
+                style={{ fontSize: 12, color: MODAL_HINT, lineHeight: 1.5, marginBottom: 10 }}
               >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {toolbarFeatures.map((feature) => {
-                    const checked = pinned.includes(feature.id)
-                    return (
+                {t('settings.pin.hint')}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {toolbarFeatures.map((feature) => {
+                  const checked = pinned.includes(feature.id)
+                  const active = descFeature === feature.id
+                  const tipId = `ms-settings-tip-${feature.id}`
+                  return (
+                    <div
+                      key={feature.id}
+                      data-toolbar-pin-row
+                      data-row-id={feature.id}
+                      style={{ position: 'relative' }}
+                    >
                       <button
-                        key={feature.id}
                         type="button"
                         role="switch"
                         data-toolbar-pin-toggle
                         data-pin-id={feature.id}
                         aria-checked={checked}
                         aria-label={t(feature.labelKey)}
+                        aria-describedby={tipId}
                         onMouseEnter={() => setDescFeature(feature.id)}
+                        onMouseLeave={() => setDescFeature((prev) => (prev === feature.id ? null : prev))}
                         onFocus={() => setDescFeature(feature.id)}
+                        onBlur={() => setDescFeature((prev) => (prev === feature.id ? null : prev))}
                         onClick={() => onTogglePin(feature.id)}
                         style={{
                           display: 'flex',
@@ -1523,17 +1719,24 @@ export function MilestoneRail({
                           justifyContent: 'space-between',
                           gap: 10,
                           width: '100%',
-                          padding: '7px 10px',
-                          background: 'transparent',
+                          padding: '8px 10px',
                           border: 'none',
-                          borderRadius: 8,
+                          borderRadius: MODAL_RADIUS_CONTROL,
                           cursor: 'pointer',
-                          color: '#e6e8ee',
+                          color: MODAL_FG,
                           fontSize: 13,
                           textAlign: 'left',
                         }}
                       >
-                        <span>{t(feature.labelKey)}</span>
+                        <span
+                          style={{
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {t(feature.labelKey)}
+                        </span>
                         {/* Switch track + thumb; accent-colored when checked. */}
                         <span
                           aria-hidden="true"
@@ -1561,175 +1764,371 @@ export function MilestoneRail({
                           />
                         </span>
                       </button>
-                    )
-                  })}
-                </div>
-                {/* Fixed hover-description pane: always visible, swaps per
-                    hovered/focused row — behaves on touch via focus too. */}
-                <div
-                  data-settings-desc
-                  aria-live="polite"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    color: '#b9c2d4',
-                    fontSize: 12.5,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {t(descKey)}
-                </div>
+                      {/* Near-row description tip: floats in the row's free
+                          right band (clears the switch), vertically centred so
+                          it never covers an adjacent row; fades in/out via
+                          MODAL_CSS. Touch reaches it through focus. */}
+                      <div
+                        id={tipId}
+                        role="tooltip"
+                        data-settings-tip
+                        data-tip-for={feature.id}
+                        data-tip-visible={active ? 'true' : undefined}
+                        style={{
+                          position: 'absolute',
+                          right: MODAL_TIP_RIGHT,
+                          top: '50%',
+                          maxWidth: '55%',
+                          transform: `translateY(-50%) translateX(${active ? 0 : 4}px)`,
+                          padding: '5px 10px',
+                          borderRadius: MODAL_RADIUS_CONTROL,
+                          background: MODAL_TIP_BG,
+                          border: `1px solid ${MODAL_BORDER}`,
+                          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+                          color: MODAL_TEXT,
+                          fontSize: 12,
+                          lineHeight: 1.45,
+                          opacity: active ? 1 : 0,
+                          visibility: active ? 'visible' : 'hidden',
+                          pointerEvents: 'none',
+                          zIndex: 4,
+                        }}
+                      >
+                        {t(`settings.desc.${feature.id}` as MilestoneKey)}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
-            {/* ② 个性化 — accent, icon/dot size, edge distance, side; every
-                control writes through to toolbar-prefs immediately. */}
-            <div data-settings-section data-settings-personal style={{ marginBottom: 14 }}>
-              <div
-                data-settings-section-title
-                style={{ fontSize: 13, fontWeight: 600, color: '#c7cede', marginBottom: 8 }}
+            {/* ② 个性化 — accent, icon/dot size, edge distance, side; every control
+                writes through to toolbar-prefs immediately. All of it is
+                tucked into a collapsible block (collapsed by default, product:
+                stop exposing the whole panel flat): the header leads with a
+                chevron + title + one live value summary, expansion reveals
+                the controls. */}
+            <div data-settings-section data-settings-personal style={{ marginBottom: 20 }}>
+              <button
+                type="button"
+                data-personal-toggle
+                aria-expanded={personalOpen}
+                aria-label={personalOpen ? t('settings.personal.collapse') : t('settings.personal.expand')}
+                title={personalOpen ? t('settings.personal.collapse') : t('settings.personal.expand')}
+                onClick={() => setPersonalOpen((v) => !v)}
+                style={SECTION_TOGGLE_STYLE}
               >
-                {t('settings.section.personal')}
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {/* Accent: preset swatches + custom color input. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
-                    {t('settings.accent')}
-                  </span>
-                  <div data-accent-swatches style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    {ACCENT_PRESETS.map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        data-accent-swatch
-                        data-accent={preset}
-                        aria-label={preset}
-                        aria-pressed={accent === preset}
-                        onClick={() => updatePrefs({ accent: preset })}
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  style={{
+                    flexShrink: 0,
+                    transform: personalOpen ? 'rotate(90deg)' : 'none',
+                  }}
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+                <span data-settings-section-title style={{ flexShrink: 0 }}>
+                  {t('settings.section.personal')}
+                </span>
+                <span data-settings-personal-summary style={SECTION_SUMMARY_STYLE}>
+                  {t('settings.personal.summary', {
+                    accent,
+                    icon: iconSize,
+                    side: side === 'left' ? t('settings.side.left') : t('settings.side.right'),
+                  })}
+                </span>
+              </button>
+              {personalOpen && (
+                <div data-settings-personal-body style={{ padding: '10px 4px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div
+                    data-settings-personal-hint
+                    style={{ fontSize: 12, color: MODAL_HINT, lineHeight: 1.5, padding: '0 6px' }}
+                  >
+                    {t('settings.personal.hint')}
+                  </div>
+                  {/* Accent: preset swatches + custom color input. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12.5, color: MODAL_HINT, width: 90, flexShrink: 0 }}>
+                      {t('settings.accent')}
+                    </span>
+                    <div data-accent-swatches style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {ACCENT_PRESETS.map((preset) => (
+                        <button
+                          key={preset}
+                          type="button"
+                          data-accent-swatch
+                          data-accent={preset}
+                          aria-label={preset}
+                          aria-pressed={accent === preset}
+                          onClick={() => updatePrefs({ accent: preset })}
+                          style={{
+                            width: 22,
+                            height: 22,
+                            borderRadius: '50%',
+                            background: preset,
+                            border:
+                              accent === preset
+                                ? '2px solid #ffffff'
+                                : '2px solid rgba(255, 255, 255, 0.25)',
+                            boxShadow: accent === preset ? `0 0 0 2px ${preset}` : 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            transition: 'border-color 120ms ease, box-shadow 120ms ease',
+                          }}
+                        />
+                      ))}
+                      <label
+                        data-accent-custom
                         style={{
-                          width: 22,
-                          height: 22,
-                          borderRadius: '50%',
-                          background: preset,
-                          border:
-                            accent === preset
-                              ? '2px solid #ffffff'
-                              : '2px solid rgba(255, 255, 255, 0.25)',
-                          boxShadow: accent === preset ? `0 0 0 2px ${preset}` : 'none',
-                          padding: 0,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          fontSize: 12.5,
+                          color: MODAL_TEXT,
                           cursor: 'pointer',
-                          transition: 'border-color 120ms ease, box-shadow 120ms ease',
                         }}
-                      />
-                    ))}
-                    <label
-                      data-accent-custom
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        fontSize: 12.5,
-                        color: '#b9c2d4',
-                        cursor: 'pointer',
-                      }}
-                    >
+                      >
+                        <input
+                          type="color"
+                          value={accent}
+                          onChange={(e) => updatePrefs({ accent: e.target.value })}
+                          aria-label={`${t('settings.custom')} ${t('settings.accent')}`}
+                          style={{
+                            width: 26,
+                            height: 26,
+                            padding: 0,
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                          }}
+                        />
+                        {t('settings.custom')}
+                      </label>
+                    </div>
+                  </div>
+                  {/* Icon/dot size slider (20-36, step 2) — scales every dot metric. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12.5, color: MODAL_HINT, width: 90, flexShrink: 0 }}>
+                      {t('settings.iconSize')}
+                    </span>
+                    <input
+                      type="range"
+                      data-icon-size
+                      min={20}
+                      max={36}
+                      step={2}
+                      value={iconSize}
+                      onChange={(e) => updatePrefs({ iconSize: Number(e.target.value) })}
+                      style={{ flex: 1, minWidth: 140, maxWidth: 260 }}
+                    />
+                    <span data-icon-size-value style={{ fontSize: 12.5, color: MODAL_TEXT, width: 40 }}>
+                      {iconSize}px
+                    </span>
+                  </div>
+                  {/* Edge distance slider (0-40, step 2) — replaces RAIL_INSET. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12.5, color: MODAL_HINT, width: 90, flexShrink: 0 }}>
+                      {t('settings.inset')}
+                    </span>
+                    <input
+                      type="range"
+                      data-inset
+                      min={0}
+                      max={40}
+                      step={2}
+                      value={inset}
+                      onChange={(e) => updatePrefs({ inset: Number(e.target.value) })}
+                      style={{ flex: 1, minWidth: 140, maxWidth: 260 }}
+                    />
+                    <span data-inset-value style={{ fontSize: 12.5, color: MODAL_TEXT, width: 40 }}>
+                      {inset}px
+                    </span>
+                  </div>
+                  {/* Rail side radio group — left flips every floating layer. */}
+                  <div role="radiogroup" aria-label={t('settings.side')} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12.5, color: MODAL_HINT, width: 90, flexShrink: 0 }}>
+                      {t('settings.side')}
+                    </span>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: MODAL_FG, cursor: 'pointer' }}>
                       <input
-                        type="color"
-                        value={accent}
-                        onChange={(e) => updatePrefs({ accent: e.target.value })}
-                        aria-label={`${t('settings.custom')} ${t('settings.accent')}`}
-                        style={{
-                          width: 26,
-                          height: 26,
-                          padding: 0,
-                          border: 'none',
-                          background: 'transparent',
-                          cursor: 'pointer',
-                        }}
+                        type="radio"
+                        name="ms-rail-side"
+                        data-side-radio
+                        value="left"
+                        checked={side === 'left'}
+                        onChange={() => updatePrefs({ side: 'left' as RailSide })}
                       />
-                      {t('settings.custom')}
+                      {t('settings.side.left')}
+                    </label>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: MODAL_FG, cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="ms-rail-side"
+                        data-side-radio
+                        value="right"
+                        checked={side === 'right'}
+                        onChange={() => updatePrefs({ side: 'right' as RailSide })}
+                      />
+                      {t('settings.side.right')}
                     </label>
                   </div>
                 </div>
-                {/* Icon/dot size slider (20-36, step 2) — scales every dot metric. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
-                    {t('settings.iconSize')}
-                  </span>
-                  <input
-                    type="range"
-                    data-icon-size
-                    min={20}
-                    max={36}
-                    step={2}
-                    value={iconSize}
-                    onChange={(e) => updatePrefs({ iconSize: Number(e.target.value) })}
-                    style={{ flex: 1, minWidth: 140, maxWidth: 260 }}
-                  />
-                  <span data-icon-size-value style={{ fontSize: 12.5, color: '#b9c2d4', width: 40 }}>
-                    {iconSize}px
-                  </span>
-                </div>
-                {/* Edge distance slider (0-40, step 2) — replaces RAIL_INSET. */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
-                    {t('settings.inset')}
-                  </span>
-                  <input
-                    type="range"
-                    data-inset
-                    min={0}
-                    max={40}
-                    step={2}
-                    value={inset}
-                    onChange={(e) => updatePrefs({ inset: Number(e.target.value) })}
-                    style={{ flex: 1, minWidth: 140, maxWidth: 260 }}
-                  />
-                  <span data-inset-value style={{ fontSize: 12.5, color: '#b9c2d4', width: 40 }}>
-                    {inset}px
-                  </span>
-                </div>
-                {/* Rail side radio group — left flips every floating layer. */}
-                <div role="radiogroup" aria-label={t('settings.side')} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12.5, color: '#8b96ab', width: 90, flexShrink: 0 }}>
-                    {t('settings.side')}
-                  </span>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: '#e6e8ee', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="ms-rail-side"
-                      data-side-radio
-                      value="left"
-                      checked={side === 'left'}
-                      onChange={() => updatePrefs({ side: 'left' as RailSide })}
-                    />
-                    {t('settings.side.left')}
-                  </label>
-                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: '#e6e8ee', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name="ms-rail-side"
-                      data-side-radio
-                      value="right"
-                      checked={side === 'right'}
-                      onChange={() => updatePrefs({ side: 'right' as RailSide })}
-                    />
-                    {t('settings.side.right')}
-                  </label>
-                </div>
-              </div>
+              )}
             </div>
 
-            {/* ②.5 语言 — the rail copy follows the harness locale, or is
+            {/* ②·½ 聚焦（0.6.3）— the focus-mode "聚焦搭配": which content the
+                master eye switch dims/collapses, and at what strength. Mirrors
+                the personalization collapsible block (collapsed by default):
+                header leads with a live option summary, expansion reveals the
+                three checkboxes + the strength slider. Every control writes
+                through to `prefs.focus` immediately. */}
+            <div data-settings-section data-focus-settings style={{ marginBottom: 20 }}>
+              <button
+                type="button"
+                data-focus-toggle-settings
+                aria-expanded={focusOpen}
+                aria-label={focusOpen ? t('settings.focus.collapse') : t('settings.focus.expand')}
+                title={focusOpen ? t('settings.focus.collapse') : t('settings.focus.expand')}
+                onClick={() => setFocusOpen((v) => !v)}
+                style={SECTION_TOGGLE_STYLE}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  style={{
+                    flexShrink: 0,
+                    transform: focusOpen ? 'rotate(90deg)' : 'none',
+                  }}
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+                <span data-settings-section-title style={{ flexShrink: 0 }}>
+                  {t('settings.section.focus')}
+                </span>
+                <span data-focus-summary style={SECTION_SUMMARY_STYLE}>
+                  {focusSummary}
+                </span>
+              </button>
+              {focusOpen && (
+                <div data-settings-focus-body style={{ padding: '10px 4px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div
+                    data-settings-focus-hint
+                    style={{ fontSize: 12, color: MODAL_HINT, lineHeight: 1.5, padding: '0 6px' }}
+                  >
+                    {t('settings.focus.hint')}
+                  </div>
+                  {/* 淡化 think（默认开）— the classic focus rule. */}
+                  <label
+                    data-focus-option
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 8px',
+                      borderRadius: MODAL_RADIUS_CONTROL,
+                      fontSize: 13,
+                      color: MODAL_FG,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-focus-dim-think
+                      checked={prefs.focus.dimThink}
+                      onChange={(e) => updateFocus({ dimThink: e.target.checked })}
+                    />
+                    {t('settings.focus.dimThink')}
+                  </label>
+                  {/* 淡化工具调用卡片（默认关）— targets the stable
+                      `[data-chat-call-id]` tool-card selector (see buildFocusCss). */}
+                  <label
+                    data-focus-option
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 8px',
+                      borderRadius: MODAL_RADIUS_CONTROL,
+                      fontSize: 13,
+                      color: MODAL_FG,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-focus-dim-tools
+                      checked={prefs.focus.dimTools}
+                      onChange={(e) => updateFocus({ dimTools: e.target.checked })}
+                    />
+                    {t('settings.focus.dimTools')}
+                  </label>
+                  {/* 折叠 think（默认关）— pure-CSS max-height strip, hover
+                      (or opening the disclosure) restores; no JS involved. */}
+                  <label
+                    data-focus-option
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 8px',
+                      borderRadius: MODAL_RADIUS_CONTROL,
+                      fontSize: 13,
+                      color: MODAL_FG,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-focus-collapse-think
+                      checked={prefs.focus.collapseThink}
+                      onChange={(e) => updateFocus({ collapseThink: e.target.checked })}
+                    />
+                    {t('settings.focus.collapseThink')}
+                  </label>
+                  {/* 淡化强度 slider (20%–80%, step 10) — feeds every dim rule. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 12.5, color: MODAL_HINT, width: 90, flexShrink: 0 }}>
+                      {t('settings.focus.opacity')}
+                    </span>
+                    <input
+                      type="range"
+                      data-focus-opacity
+                      min={0.2}
+                      max={0.8}
+                      step={0.1}
+                      value={prefs.focus.opacity}
+                      onChange={(e) => updateFocus({ opacity: Number(e.target.value) })}
+                      style={{ flex: 1, minWidth: 140, maxWidth: 260 }}
+                    />
+                    <span data-focus-opacity-value style={{ fontSize: 12.5, color: MODAL_TEXT, width: 44 }}>
+                      {Math.round(prefs.focus.opacity * 100)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ③ 语言 — the rail copy follows the harness locale, or is
                 forced here to the plugin's own zh/en dictionaries. */}
-            <div data-settings-section data-settings-lang style={{ marginBottom: 14 }}>
+            <div data-settings-section data-settings-lang style={{ marginBottom: 20 }}>
               <div
                 data-settings-section-title
-                style={{ fontSize: 13, fontWeight: 600, color: '#c7cede', marginBottom: 8 }}
+                style={{ fontSize: 13, fontWeight: 600, color: MODAL_TITLE, marginBottom: 8 }}
               >
                 {t('settings.language')}
               </div>
@@ -1746,7 +2145,7 @@ export function MilestoneRail({
                       alignItems: 'center',
                       gap: 5,
                       fontSize: 13,
-                      color: '#e6e8ee',
+                      color: MODAL_FG,
                       cursor: 'pointer',
                     }}
                   >
@@ -1764,10 +2163,10 @@ export function MilestoneRail({
               </div>
             </div>
 
-            {/* ③ 支持我们 — compact 2×2 card grid (whole card clickable,
+            {/* 支持我们 — compact 2×2 card grid (whole card clickable,
                 _blank+noreferrer, hover micro-lift via MODAL_CSS). */}
             <div data-toolbar-settings-footer style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: 12, color: '#8b96ab', marginBottom: 10 }}>
+              <div style={{ fontSize: 12, color: MODAL_HINT, marginBottom: 10 }}>
                 {t('settings.support')}
               </div>
               <div
@@ -1840,13 +2239,12 @@ export function MilestoneRail({
               onClick={onResetAll}
               style={{
                 display: 'block',
-                margin: '14px auto 0',
+                margin: '16px auto 2px',
                 padding: '7px 16px',
-                background: 'rgba(255, 255, 255, 0.06)',
-                border: '1px solid rgba(255, 255, 255, 0.14)',
-                borderRadius: 8,
+                border: `1px solid ${MODAL_BORDER}`,
+                borderRadius: MODAL_RADIUS_CONTROL,
                 cursor: 'pointer',
-                color: '#b9c2d4',
+                color: MODAL_TEXT,
                 fontSize: 12.5,
               }}
             >
