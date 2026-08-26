@@ -19,6 +19,18 @@ const runtimeClientShim = fileURLToPath(new URL('./src/test/runtime-client.ts', 
 export default defineConfig({
   test: {
     environment: 'jsdom',
+    /**
+     * Pin a non-opaque jsdom origin: jsdom only exposes window.localStorage
+     * for http(s) documents, and some vitest/jsdom versions default to
+     * about:blank, where accessing it throws "localStorage is not available
+     * for opaque origins". That broke the toolbar-prefs / version-logic
+     * suites on clean clones (Linux, Node 22). setup.ts also polyfills
+     * localStorage defensively, so the suites stay green even if the
+     * default URL ever changes again.
+     */
+    environmentOptions: {
+      jsdom: { url: 'http://localhost/' },
+    },
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
   },
