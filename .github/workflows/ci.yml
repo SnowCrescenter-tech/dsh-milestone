@@ -24,7 +24,10 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          # pnpm-workspace.yaml uses the pnpm 11-only `minimumReleaseAge`
+          # setting; pnpm 9 misparses the file as a workspace root and
+          # fails with "packages field missing or empty".
+          version: 11
 
       - uses: actions/setup-node@v5
         with:
