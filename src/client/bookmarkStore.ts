@@ -7,8 +7,13 @@
  * resolved by the engine's `create(scopeKey)`). Consumers must call the
  * FACTORY (never a module-level handle — module-cache identity is a disguised
  * singleton across plugin reloads).
+ *
+ * 0.1.2 compat: the snapshot-store engine moved out of
+ * `@deepseek-ai/dsh-client-runtime/client` into the platform module
+ * `@deepseek-ai/dsh-client-store` (a web module-table seed); the old
+ * specifier is gone from the 0.1.2 module table.
  */
-import { defineStore } from '@deepseek-ai/dsh-client-runtime/client'
+import { defineStore } from '@deepseek-ai/dsh-client-store'
 import { toggleKey } from './bookmark-logic'
 
 /** Store state: the bookmark key list, in toggle order. */

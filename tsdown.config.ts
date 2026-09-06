@@ -32,7 +32,7 @@ const PLATFORM_MODULES = [
 ]
 
 /** Externals answered by the loader module table. */
-const CLIENT_EXTERNALS = [...PLATFORM_MODULES, '@deepseek-ai/dsh-client-runtime/client']
+const CLIENT_EXTERNALS = [...PLATFORM_MODULES, '@deepseek-ai/dsh-client-store']
 
 export default defineConfig(() => [
   // Node half: the host cordis loader imports this row's module.
