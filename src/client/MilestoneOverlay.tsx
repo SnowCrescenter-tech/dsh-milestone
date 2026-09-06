@@ -3,6 +3,9 @@
  * session-scoped `milestone.rail` child, so the framework hands it the
  * `SessionProvider` seat (PropsRenderSlots derives it from the child scope).
  * It then renders the rail inside that session area: no session, no rail.
+ *
+ * 0.1.2 compat: `SessionAreaProps.children` is a plain `ReactNode` (the
+ * render-prop children form was removed), so the rail renders directly.
  */
 import type { PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 
@@ -15,7 +18,7 @@ export type MilestoneOverlayProps = PropsRuntime<'shell.overlay'> & PropsRenderS
 export function MilestoneOverlay({ SessionProvider, renderSlot }: MilestoneOverlayProps) {
   return (
     <SessionProvider empty={() => null}>
-      {() => renderSlot('milestone.rail', {})}
+      {renderSlot('milestone.rail', {})}
     </SessionProvider>
   )
 }

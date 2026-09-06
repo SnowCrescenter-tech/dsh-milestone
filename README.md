@@ -109,8 +109,9 @@ shell.overlay (root scope)
 
 ## 版本与兼容
 
-- 当前官方支持线：**`0.1.1-rc.2`**（peer/dev 依赖 `^0.1.1-rc.2`，与 `@deepseek-ai/dsh` 最新 `latest` 标签一致）。
-- 官方客户端包（`dsh-client-runtime` 等）在 npm 上走 `next` 标签发布（`latest` 标签仍是远古版本）；升级 harness 后若发现插件不匹配，请确认安装的依赖解析到了 `0.1.1-rc.2` 线。
+- 当前官方支持线：**`0.1.2-rc.1`**（与 `@deepseek-ai/dsh` 最新 `latest` 标签一致）。
+- peer/dev 范围采用**双分支**写法 `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-rc.1 <0.2.0-0`：node-semver 的 prerelease 规则会让 `^0.1.1-rc.2` 静默排除 `0.1.2-rc.1`（元组不同），旧写法下升级 harness 的用户会直接 ERESOLVE。
+- 官方客户端包（`dsh-client-runtime` 等）在 npm 上走 `next` 标签发布（`latest` 标签仍是远古版本）；升级 harness 后若发现插件不匹配，请确认安装的依赖解析到了 `0.1.2-rc.1` 线（`dsh-client-runtime` 的 `next` 目前仍为 `0.1.1-rc.2`，属官方发布节奏，不影响）。
 - harness 当前版本在浏览器端没有可信来源（`host.describe().version` 是占位值），因此不做精确探测，以插件声明的支持线为准。
 
 ## 已知限制
