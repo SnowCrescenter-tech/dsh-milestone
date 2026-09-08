@@ -2,3 +2,9 @@
 # published packages). @deepseek-ai harness packages are published same-day,
 # so relax the guard for this plugin's dependency set.
 minimumReleaseAge: 0
+
+# Pin one zod copy: the harness 0.1.2 line ships zod ^4.4.3 (its published
+# ProjectionDefinition types are compiled against 4.4.3's ZodObject shape);
+# forcing 4.5.4 produced a type mismatch. Every consumer gets 4.4.3.
+overrides:
+  zod: 4.4.3

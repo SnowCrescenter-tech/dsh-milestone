@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
 import type { SessionSearchResultItemLike } from './railInject.ts'
 
@@ -50,7 +51,7 @@ export interface MilestoneSessionSearchProps {
   /** The injected cross-session search action (railInject.ts). */
   readonly searchSessions: SearchSessionsFn
   /** The injected open-session action (railInject.ts). */
-  readonly openSession: (id: string) => void
+  readonly openSession: (id: SessionId) => void
   /** Locale interpreter: resolves `dsh-milestone` dictionary keys (from MilestoneRail). */
   readonly t: TranslateNS<'dsh-milestone'>
 }

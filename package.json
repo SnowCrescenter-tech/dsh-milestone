@@ -49,16 +49,18 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
     "@deepseek-ai/dsh-client-locale": ">=0.1.2-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-store": ">=0.1.2-rc.1 <0.3.0-0",
     "@deepseek-ai/dsh-client-ui-slots": ">=0.1.2-rc.1 <0.3.0-0",
-    "react": "^18.2.0",
-    "@deepseek-ai/dsh-client-store": ">=0.1.2-rc.1 <0.3.0-0"
+    "react": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-api-session-controller": "0.1.2-rc.1",
     "@deepseek-ai/dsh-client-locale": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-runtime": ">=0.1.1-rc.2 <0.1.2 || >=0.1.2-rc.1 <0.2.0-0",
     "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
     "@deepseek-ai/dsh-client-ui-layout": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-session": "0.1.2-rc.1",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
     "@playwright/test": "^1.62.1",
     "@testing-library/jest-dom": "^7.0.1",
@@ -71,5 +73,10 @@
     "tsdown": "0.22.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-session": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-session-projection": "0.1.2-rc.1",
+    "zod": "^4.5.4"
   }
 }

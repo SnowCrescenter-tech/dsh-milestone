@@ -1,7 +1,22 @@
 /**
- * dsh-milestone node half. Pure UI plugin: the empty apply exists so the
- * plugin appears in the host cordis.yml / Loader (load and lifecycle follow
- * the host); the browser half ships via exports["./client"], discovered
- * through the package.json dsh.client declaration.
+ * dsh-milestone node half. Registers the `milestone.messages` session
+ * projection (whole-log user-message outline + per-turn metadata), which the
+ * browser half consumes through `useProjection` — the 0.1.2-native channel
+ * for non-chat-slot plugins to read conversation content.
  */
-export function apply(): void {}
+import type { Context } from '@deepseek-ai/cordis'
+import { milestoneMessagesProjectionDefinition } from './projection/milestone-messages'
+
+/** Cordis plugin name. */
+export const name = 'milestone'
+
+/** The projection registry is the node half's only dependency. */
+export const inject = ['sessionProjections']
+
+/**
+ * Register the milestone projection unit; the registration is an effect on
+ * this plugin's fiber, so unloading removes the key.
+ */
+export function apply(ctx: Context): void {
+  ctx.sessionProjections.register(milestoneMessagesProjectionDefinition)
+}

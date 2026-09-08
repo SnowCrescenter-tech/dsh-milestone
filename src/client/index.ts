@@ -10,7 +10,12 @@
  * our own overlay entry, so both registrations go through `ctx.slots.inject`
  * and follow their declaration lifetimes.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context } from '@deepseek-ai/cordis'
+// Type-only: pulls the slots registry and session standard-kit merges onto
+// Context / SessionStandardProps (ctx.slots, useSession, useProjection).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 // Type-only: pulls the locale plugin's Context merge (ctx.locale.register).
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 // Establishes the module reference the SlotMap declaration merge below extends.
@@ -22,7 +27,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import { MilestoneOverlay } from './MilestoneOverlay.tsx'
 import { MilestoneRail } from './MilestoneRail.tsx'
 import { createBookmarksStore } from './bookmarkStore.ts'
-import { createForkAt, createLoadOlder, createOpenSession, createSessionSearch } from './railInject.ts'
+import { createForkAt, createLoadOlder, createOpenSession, createSessionSearch, type SessionServiceFace } from './railInject.ts'
 import { en, zh, type MilestoneKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -50,7 +55,13 @@ export const inject = ['slots', 'sessions', 'locale']
  * appears exactly when the overlay entry mounts.
  * @param ctx - client root context.
  */
-export function apply(ctx: ClientContext): void {
+export function apply(ctx: Context): void {
+  // 0.1.2 type note: `@deepseek-ai/dsh-session` (a projection dependency)
+  // still merges an obsolete `sessions: SessionStore` onto Context, which
+  // shadows the api-session-controller `ISessions` merge. The runtime value
+  // IS the 0.1.2 ISessions (search/open/binding/fork/list) — structurally
+  // asserted here so the rail's inject face types against the real surface.
+  const sessions = ctx.sessions as unknown as SessionServiceFace
   ctx.effect(() => ctx.locale.register('dsh-milestone', { zh, en }), 'dsh-milestone: dictionaries')
   ctx.slots.inject('shell.overlay', () => ctx.slots.register(
     {
@@ -77,10 +88,10 @@ export function apply(ctx: ClientContext): void {
       store: createBookmarksStore,
       locale: 'dsh-milestone',
       inject: (sessionId) => ({
-        loadOlder: createLoadOlder(ctx.sessions, sessionId),
-        forkAt: createForkAt(ctx.sessions, sessionId),
-        searchSessions: createSessionSearch(ctx.sessions),
-        openSession: createOpenSession(ctx.sessions),
+        loadOlder: createLoadOlder(sessions, sessionId),
+        forkAt: createForkAt(sessions, sessionId),
+        searchSessions: createSessionSearch(sessions),
+        openSession: createOpenSession(sessions),
       }),
     },
     MilestoneRail,

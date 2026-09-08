@@ -50,7 +50,8 @@ import { filterByBookmarks, isBookmarked } from './bookmark-logic'
 import { copyText } from './clipboard-logic'
 import { buildMessageHash, parseDeepLinkHash } from './deep-link-logic'
 import { reasonKeyOf } from './label-logic'
-import { deriveTurnMeta } from './tooltip-logic'
+import { deriveTurnMeta, deriveTurnMetaFromProjection } from './tooltip-logic'
+import type { MilestoneMessageEntry } from '../projection/milestone-messages'
 import { clampIndex, nextFocusIndex } from './rail-keyboard'
 import { dotColor, extractText, filterMarks, markState, nextMatchIndex } from './rail-logic'
 import { en, translateDict, zh, type MilestoneKey } from './locales.ts'
@@ -60,6 +61,7 @@ import { MilestoneListPanel } from './MilestoneListPanel.tsx'
 import { MilestoneTour } from './MilestoneTour.tsx'
 import { MilestoneRailTooltip } from './MilestoneRailTooltip.tsx'
 import { MilestoneSessionSearch } from './MilestoneSessionSearch.tsx'
+import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { SearchSessionsFn } from './MilestoneSessionSearch.tsx'
 import { readOnboardedFlag } from './onboarding-store'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
@@ -86,7 +88,7 @@ export type MilestoneRailProps = PropsRuntime<'milestone.rail'> &
     loadOlder: () => Promise<void>
     forkAt: (atSeq: number) => Promise<string>
     searchSessions: SearchSessionsFn
-    openSession: (id: string) => void
+    openSession: (id: SessionId) => void
   }> &
   PropsStore<ReturnType<typeof createBookmarksStore>> &
   PropsLocale<'dsh-milestone'>
@@ -96,6 +98,10 @@ const MIN_MARKS = 2
 const PREVIEW_LENGTH = 80
 /** Stable no-bookmarks fallback for render paths without the store seat. */
 const NO_BOOKMARKS: readonly string[] = []
+/** Stable empty projection fallback before the host unit mounts. */
+const EMPTY_PROJECTION_MESSAGES: readonly MilestoneMessageEntry[] = Object.freeze([])
+/** 0.1.2: per-turn badge kinds are not projected yet; stays empty. */
+const EMPTY_KINDS_BY_TURN: ReadonlyMap<number, readonly string[]> = new Map()
 /** Stable no-kinds fallback for marks whose turn carries no badge nodes. */
 const NO_KINDS: readonly string[] = []
 /** Visual dot diameter at the default icon size (px). */
@@ -517,6 +523,7 @@ function turnTailOf(turn: unknown): { ttftMs?: number; tokensPerSecond?: number 
  */
 export function MilestoneRail({
   useSession,
+  useProjection,
   loadOlder,
   forkAt,
   useStore,
@@ -527,17 +534,10 @@ export function MilestoneRail({
   openSession = () => {},
   t: frameworkT = (key) => key,
 }: MilestoneRailProps) {
-  const order = useSession(s => s.chat.order)
-  const nodes = useSession(s => s.chat.nodes)
-  const locations = useSession(s => s.chat.locations)
-  const timeline = useSession(s => s.chat.timeline)
-  // C2: the ui-trajectory request stream, the fallback source for the hover
-  // model/purpose/token metadata. The harness merges the 'trajectory' key
-  // into ConversationViewSnapshotMap (not shipped with this plugin), so the
-  // view store is decoded structurally at the boundary.
-  const trajectoryRequests = useSession(
-    (s) => (s.views as { get(key: string): TrajectoryViewLike | undefined }).get('trajectory')?.requests,
-  )
+  // 0.1.2: conversation content comes from the `milestone.messages` session
+  // projection (whole-log user-message outline + per-turn metadata); the
+  // session-scoped useSession snapshot now carries lifecycle state only.
+  const projection = useProjection?.('milestone.messages')
   // F3: the conversation paging window. `hasMore` is boolean (no absolute
   // count available), `loadingOlder` gates the button while a page loads.
   const hasMore = useSession(s => s.hasMore)
@@ -549,54 +549,35 @@ export function MilestoneRail({
   // bookmarks.
   const bookmarkedKeys = useStore?.((s) => s.keys) ?? NO_BOOKMARKS
 
-  // Ordered user-message dots. node.kind === 'user' is the append-origin human
-  // prompt (steering/context/assistant/tool kinds are skipped).
+  // Ordered user-message dots, from the projection (every user/message event
+  // in the whole log — no loaded-window limit). `key` is the event seq string:
+  // 0.1.2 conversation rows expose `data-chat-turn` (turn-level) but no
+  // message-level seq attribute, so jumps target the turn; precise per-message
+  // anchoring is a follow-up once the row anchor vocabulary is verified.
   const marks = useMemo<MilestoneMark[]>(() => {
-    const result: MilestoneMark[] = []
-    for (const key of order) {
-      const node = nodes.get(key)
-      if (node === undefined || node.kind !== 'user') continue
-      const data = node.data as { seq?: number; time?: number; content?: unknown }
-      const turn = node.location.kind === 'turn' || node.location.kind === 'step'
-        ? node.location.turn.turn
-        : undefined
-      result.push({
-        key,
-        turn,
-        seq: data.seq ?? 0,
-        time: data.time ?? 0,
-        text: extractText(data.content),
-        preview: extractPreview(data.content),
-      })
-    }
-    return result
-  }, [order, nodes])
+    const messages: readonly MilestoneMessageEntry[] = projection?.messages ?? EMPTY_PROJECTION_MESSAGES
+    return messages.map((m) => ({
+      key: String(m.seq),
+      turn: m.turn,
+      seq: m.seq as number,
+      time: m.time,
+      text: m.text,
+      preview: m.preview,
+    }))
+  }, [projection])
 
   // F4: turn-scoped durable badge kinds ('turn-error' / 'turn-max-tokens' /
   // 'model-retry') indexed by the turn their node sits on. A cancelled
   // model-retry is dead (its turn aborted before the retry started) and
   // carries no badge.
-  const kindsByTurn = useMemo<ReadonlyMap<number, readonly string[]>>(() => {
-    const result = new Map<number, string[]>()
-    for (const node of nodes.values()) {
-      if (node.kind !== 'turn-error' && node.kind !== 'turn-max-tokens' && node.kind !== 'model-retry') continue
-      if (node.kind === 'model-retry') {
-        const retryState = (node.data as { retryState?: string } | undefined)?.retryState
-        if (retryState === 'cancelled') continue
-      }
-      if (node.location.kind !== 'turn' && node.location.kind !== 'step') continue
-      const kinds = result.get(node.location.turn.turn) ?? []
-      kinds.push(node.kind)
-      result.set(node.location.turn.turn, kinds)
-    }
-    return result
-  }, [order, nodes])
+  // 0.1.2: turn-scoped badge kinds are not projected yet; stays empty.
+  const kindsByTurn: ReadonlyMap<number, readonly string[]> = EMPTY_KINDS_BY_TURN
 
   // F4: transient badges target only the newest mark — the session is
   // producing tokens (running) or waiting on a pending interaction
   // (awaitingInput: a non-empty `pending` snapshot).
   const running = useSession(s => s.running)
-  const awaitingInput = (useSession(s => s.pending) as unknown[]).length > 0
+  const awaitingInput = (useSession(s => s.queue) as unknown[]).length > 0
 
   const [railBox, setRailBox] = useState<RailBox | null>(null)
   const [hover, setHover] = useState<HoverInfo | null>(null)
@@ -635,7 +616,7 @@ export function MilestoneRail({
   // F2: the user message at/just above the conversation viewport top. Changes
   // whenever the scrollport scrolls (or the message set reorders), re-rendering
   // the dots so the current one carries the white ring.
-  const currentKey = useCurrentAnchor(order)
+  const currentKey = useCurrentAnchor(marks.map((m) => m.key))
 
   /**
    * P3: jump to the chat row with the given node key — smooth-scroll it into
@@ -1472,31 +1453,31 @@ export function MilestoneRail({
     // acknowledgements — the hover change itself is the reset (no timers).
     if (copiedKey !== null && mark.key !== copiedKey) setCopiedKey(null)
     if (forkedKey !== null && mark.key !== forkedKey) setForkedKey(null)
-    const turn = mark.turn !== undefined ? timeline.turns.get(mark.turn) : undefined
+    const turnMeta = mark.turn !== undefined
+      ? projection?.turns.find((turn) => turn.turn === mark.turn)
+      : undefined
     let durationLabel: string | null = null
     let reasonLabel: string | null = null
     let ttftLabel: string | null = null
     let tpsLabel: string | null = null
-    if (turn !== undefined) {
-      if (turn.start !== undefined && turn.end !== undefined) {
-        durationLabel = formatDuration(turn.end.time - turn.start.time)
+    if (turnMeta !== undefined) {
+      if (turnMeta.startTime !== undefined && turnMeta.endTime !== undefined) {
+        durationLabel = formatDuration(turnMeta.endTime - turnMeta.startTime)
       }
-      if (turn.end !== undefined) {
-        const reason = (turn.end.data as { reason?: { kind?: string } }).reason
-        // Unknown end-reason kinds pass through `reasonKeyOf` unchanged and
-        // `t` falls back to the raw kind string (label-logic's escape hatch).
-        if (reason?.kind !== undefined) reasonLabel = t(reasonKeyOf(reason.kind) as MilestoneKey)
+      if (turnMeta.endReason !== undefined) {
+        reasonLabel = t(reasonKeyOf(turnMeta.endReason) as MilestoneKey)
       }
-      const tail = turnTailOf(turn)
-      if (tail !== undefined) {
-        if (tail.ttftMs !== undefined) ttftLabel = formatDuration(tail.ttftMs)
-        if (tail.tokensPerSecond !== undefined) tpsLabel = `${tail.tokensPerSecond.toFixed(1)} tok/s`
+      if (turnMeta.firstChunkTime !== undefined && turnMeta.startTime !== undefined) {
+        ttftLabel = formatDuration(turnMeta.firstChunkTime - turnMeta.startTime)
+      }
+      if (turnMeta.usage !== undefined && durationLabel !== null) {
+        const seconds = (turnMeta.endTime! - turnMeta.startTime) / 1000
+        if (seconds > 0) tpsLabel = `${(turnMeta.usage.output / seconds).toFixed(1)} tok/s`
       }
     }
-    // C2: model / purpose / token usage for the turn, from its assistant-step
-    // node(s), falling back to the trajectory request stream when no node
-    // answers. All-null when the turn is absent or nothing is recorded.
-    const meta = deriveTurnMeta(nodes, locations, mark.turn, trajectoryRequests)
+    // 0.1.2: model / purpose come from the projection's turn usage; the fold
+    // does not (yet) carry provider/model provenance, so they degrade to null.
+    const meta = deriveTurnMetaFromProjection(turnMeta)
     // C4 (0.6.6): a collapsed turn's summary dot represents a RANGE of marks
     // — its position line names the whole range (`第 a–b / m 条`) instead of
     // only the last mark's slot.

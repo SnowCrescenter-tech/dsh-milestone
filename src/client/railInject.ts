@@ -9,6 +9,8 @@
  * `session.loadOlder(): Promise<void>` loads the previous message page.
  */
 
+import type { SessionId } from '@deepseek-ai/dsh-session'
+
 /** Structural sessions-service face — mirrors the harness `ISessions` contract for `binding` and `fork`. */
 export interface SessionsLike {
   binding(id: string): { session: { loadOlder(): Promise<unknown> } } | undefined
@@ -17,7 +19,7 @@ export interface SessionsLike {
 
 /** One cross-session search hit: the harness's `session.search` RPC item. */
 export interface SessionSearchResultItemLike {
-  sessionId: string
+  sessionId: SessionId
   snippet: string
 }
 
@@ -36,9 +38,12 @@ export type SessionSearchRpcResult = {
  */
 export interface SessionSearchLike {
   search(query: string, signal: AbortSignal): Promise<SessionSearchRpcResult>
-  open(id: string): void
-  list: { getSnapshot(): { byId: Record<string, { displayTitle: string }> } }
+  open(id: SessionId): void
+  list: { getSnapshot(): { byId: Record<SessionId, { title?: string }> } }
 }
+
+/** Union of the structural sessions faces the rail's inject uses. */
+export type SessionServiceFace = SessionsLike & SessionSearchLike
 
 /**
  * Wrap the `session.search` RPC into a safe cross-session search action.
@@ -66,7 +71,7 @@ export function createSessionSearch(
     return {
       items: result.value.items.map((item) => ({
         ...item,
-        title: byId[item.sessionId]?.displayTitle,
+        title: byId[item.sessionId]?.title,
       })),
       hasMore: result.value.hasMore,
     }
@@ -80,7 +85,7 @@ export function createSessionSearch(
  * @param sessions - the injected sessions service (`ctx.sessions`).
  * @returns an action that opens the given session.
  */
-export function createOpenSession(sessions: SessionSearchLike): (id: string) => void {
+export function createOpenSession(sessions: SessionSearchLike): (id: SessionId) => void {
   return (id) => sessions.open(id)
 }
 

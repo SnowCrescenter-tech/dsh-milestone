@@ -113,3 +113,22 @@ export function deriveTurnMeta(
 
   return EMPTY_META
 }
+
+/**
+ * 0.1.2: derive hover metadata from the `milestone.messages` projection's
+ * per-turn fold state. The fold carries token usage and timing; provider /
+ * model provenance is not folded yet, so those degrade to null.
+ * @param turn - the projection's turn meta, or undefined when absent.
+ * @returns the turn's metadata, null where unknown.
+ */
+export function deriveTurnMetaFromProjection(
+  turn: { readonly usage?: { readonly input: number; readonly output: number; readonly total: number } } | undefined,
+): TurnMeta {
+  if (turn?.usage === undefined) return EMPTY_META
+  return {
+    model: null,
+    purpose: null,
+    inputTokens: turn.usage.input,
+    outputTokens: turn.usage.output,
+  }
+}
