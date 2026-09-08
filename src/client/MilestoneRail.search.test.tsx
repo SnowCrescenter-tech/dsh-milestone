@@ -116,7 +116,9 @@ describe('MilestoneRail search (F1)', () => {
     expect(dot(3)).toHaveAttribute('aria-current', 'true')
     expect(dot(1)).not.toHaveAttribute('aria-current')
     const lastJump = spy.mock.instances.at(-1) as HTMLElement | undefined
-    expect(lastJump?.dataset.chatAnchorKey).toBe(USERS_ALPHA[2].key)
+    // 0.1.2: the rail's mark key (and thus the anchor row's `data-chat-anchor-key`)
+    // is the message's event seq string, not the legacy node key.
+    expect(lastJump?.dataset.chatAnchorKey).toBe(String(USERS_ALPHA[2].seq))
 
     // Enter again: wrap back to the first match.
     fireEvent.keyDown(searchInput(), { key: 'Enter' })

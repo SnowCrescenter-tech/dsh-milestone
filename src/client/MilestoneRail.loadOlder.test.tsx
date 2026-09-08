@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { renderRail } from '../test/renderRail.tsx'
 import type { RailUser } from '../test/renderRail.tsx'
+import { projectionFromSnapshot } from '../test/renderRail.tsx'
 import { buildSnapshot } from '../test/snapshot-fixture.ts'
 import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
 import { MilestoneRail } from './MilestoneRail.tsx'
@@ -41,16 +42,21 @@ function makeT(dict: Record<string, string>) {
 
 /**
  * Mirror of `renderRail`'s scaffold that stamps paging flags into the
- * snapshot fixture (renderRail itself cannot express them).
+ * snapshot fixture (renderRail itself cannot express them) and injects the
+ * 0.1.2 `milestone.messages` projection the same way `renderRail` does.
  */
 function renderRailFlagged(users: RailUser[], flags: PagingFlags) {
   const snapshot = buildSnapshot({ users, ...flags })
-  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) => selector(snapshot)
+  const projection = projectionFromSnapshot(snapshot)
+  // 0.1.2: useSession exposes lifecycle state only; the fixture's legacy
+  // `pending` array maps onto the new `queue` field the rail reads.
+  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) =>
+    selector({ ...snapshot, queue: snapshot.pending })
   const loadOlder = vi.fn(async () => {})
   const props = {
     useSession,
     sessionId: 'fixture',
-    useProjection: () => undefined,
+    useProjection: (key?: string) => (key === 'milestone.messages' ? projection : undefined),
     loadOlder,
     t: makeT(zh as Record<string, string>),
   } as unknown as MilestoneRailProps
@@ -59,7 +65,8 @@ function renderRailFlagged(users: RailUser[], flags: PagingFlags) {
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
         {users.map((user) => (
-          <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+          // 0.1.2: anchor rows are keyed by the message's event seq string.
+          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
             {user.text}
           </div>
         ))}

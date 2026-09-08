@@ -1,29 +1,31 @@
 /**
- * RED component tests for the milestone rail's turn-health status badges
- * (F4, NOT implemented yet): each dot's ring must carry
- * `data-badge="<kind>"` (kind ∈ error | max-tokens | retry | running |
- * awaiting), derived per mark via `deriveBadge` (src/client/badge-logic.ts).
+ * Component tests for the milestone rail's status badges (F4): each dot's ring
+ * must carry `data-badge="<kind>"` (kind ∈ error | max-tokens | retry |
+ * running | awaiting), derived per mark via `deriveBadge`
+ * (src/client/badge-logic.ts).
  *
- * Contract asserted here:
- * - Durable kinds (error / max-tokens / retry) come from chat nodes stamped on
- *   a specific turn (`turn-error` / `turn-max-tokens` / `model-retry`) and are
- *   turn-scoped: the badge lands on the mark whose turn the node sits on.
+ * 0.1.2 contract asserted here:
+ * - Durable kinds (error / max-tokens / retry) came from chat nodes stamped on
+ *   a specific turn (`turn-error` / `turn-max-tokens` / `model-retry`). The
+ *   0.1.2 event layer no longer carries those node kinds — the fold only sees
+ *   `turn`/`end` reasons — so `kindsByTurn` is constant empty and a durable
+ *   badge NEVER renders, even when a legacy-shaped node is stamped on the
+ *   fixture (regression guard for the migration).
  * - Transient kinds (running / awaiting) come from the session flags
- *   (`running` / non-empty `pending`) and target ONLY the last mark.
- * - Precedence: error > max-tokens > retry > running > awaiting.
+ *   (`running` / non-empty `pending`, read through the new `queue` lifecycle
+ *   field) and target ONLY the last mark.
+ * - Remaining precedence (transient pair): running > awaiting.
  *
  * `renderRail` builds its snapshot with just `users` (no `nodes`/`running`/
  * `pending` options), so the flagged cases render through a local mirror that
- * feeds `buildSnapshot` the badge-relevant options directly — the harness
- * scaffold (scrollport + anchor rows + rail) stays identical, same as the
- * load-older tests' local helper.
- *
- * The feature does not exist yet, so every `[data-badge]` lookup is empty and
- * all tests below FAIL — for the right reason (missing `data-badge`).
+ * feeds `buildSnapshot` the badge-relevant options directly and injects the
+ * `milestone.messages` projection the same way `renderRail` does — the
+ * harness scaffold (scrollport + anchor rows + rail) stays identical.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import type { RailUser } from '../test/renderRail.tsx'
+import { projectionFromSnapshot } from '../test/renderRail.tsx'
 import { buildSnapshot } from '../test/snapshot-fixture.ts'
 import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
 import { MilestoneRail } from './MilestoneRail.tsx'
@@ -53,16 +55,22 @@ function makeT(dict: Record<string, string>) {
 
 /**
  * Mirror of `renderRail`'s scaffold that stamps the badge-relevant options
- * into the snapshot fixture (renderRail itself cannot express them).
+ * into the snapshot fixture (renderRail itself cannot express them) and
+ * injects the 0.1.2 `milestone.messages` projection the same way.
  */
 function renderBadge(users: RailUser[], opts: BadgeOptions = {}) {
   const snapshot = buildSnapshot({ users, nodes: opts.nodes, running: opts.running, pending: opts.pending })
-  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) => selector(snapshot)
+  const projection = projectionFromSnapshot(snapshot)
+  // 0.1.2: useSession exposes lifecycle state only; the fixture's legacy
+  // `pending` array maps onto the new `queue` field the rail reads for
+  // awaitingInput.
+  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) =>
+    selector({ ...snapshot, queue: snapshot.pending })
   const loadOlder = vi.fn(async () => {})
   const props = {
     useSession,
     sessionId: 'fixture',
-    useProjection: () => undefined,
+    useProjection: (key?: string) => (key === 'milestone.messages' ? projection : undefined),
     loadOlder,
     t: makeT(zh as Record<string, string>),
   } as unknown as MilestoneRailProps
@@ -71,7 +79,8 @@ function renderBadge(users: RailUser[], opts: BadgeOptions = {}) {
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
         {users.map((user) => (
-          <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+          // 0.1.2: anchor rows are keyed by the message's event seq string.
+          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
             {user.text}
           </div>
         ))}
@@ -102,25 +111,37 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('MilestoneRail status badges (F4, RED — feature not implemented)', () => {
-  it('turn-error node on turn 1 -> dot 1 carries data-badge="error"', () => {
+describe('MilestoneRail status badges (F4, 0.1.2)', () => {
+  it('turn-error node on turn 1 -> no dot carries data-badge="error" (0.1.2: kindsByTurn is empty)', () => {
     renderBadge(USERS, { nodes: [{ key: '13:turn-error<node-1>', kind: 'turn-error', turn: 1 }] })
 
-    expect(badgeOf(1)).toBe('error')
+    // 0.1.2: the event layer no longer carries turn-error nodes (the fold only
+    // sees turn/end reasons), so the durable error badge never renders.
+    expect(badgeOf(1)).toBeNull()
+    expect(badgeOf(2)).toBeNull()
+    expect(badgeOf(3)).toBeNull()
   })
 
-  it('turn-max-tokens node on turn 1 -> dot 1 carries data-badge="max-tokens"', () => {
+  it('turn-max-tokens node on turn 1 -> no dot carries data-badge="max-tokens" (0.1.2: kindsByTurn is empty)', () => {
     renderBadge(USERS, { nodes: [{ key: '13:turn-max-tokens<node-1>', kind: 'turn-max-tokens', turn: 1 }] })
 
-    expect(badgeOf(1)).toBe('max-tokens')
+    // 0.1.2: turn-max-tokens nodes are gone from the event layer, so the
+    // durable max-tokens badge never renders.
+    expect(badgeOf(1)).toBeNull()
+    expect(badgeOf(2)).toBeNull()
+    expect(badgeOf(3)).toBeNull()
   })
 
-  it('model-retry node (retryState scheduled) on turn 1 -> dot 1 carries data-badge="retry"', () => {
+  it('model-retry node (retryState scheduled) on turn 1 -> no dot carries data-badge="retry" (0.1.2: kindsByTurn is empty)', () => {
     renderBadge(USERS, {
       nodes: [{ key: '13:model-retry<node-1>', kind: 'model-retry', turn: 1, retryState: 'scheduled' }],
     })
 
-    expect(badgeOf(1)).toBe('retry')
+    // 0.1.2: model-retry nodes are gone from the event layer, so the durable
+    // retry badge never renders (retryState is irrelevant).
+    expect(badgeOf(1)).toBeNull()
+    expect(badgeOf(2)).toBeNull()
+    expect(badgeOf(3)).toBeNull()
   })
 
   it('running:true -> only the last dot carries data-badge="running"', () => {
@@ -137,13 +158,13 @@ describe('MilestoneRail status badges (F4, RED — feature not implemented)', ()
     expect(badgeOf(USERS.length - 1)).toBeNull()
   })
 
-  it('precedence: turn-error on turn 1 with running:true -> dot 1 "error", last dot "running"', () => {
-    renderBadge(USERS, {
-      nodes: [{ key: '13:turn-error<node-1>', kind: 'turn-error', turn: 1 }],
-      running: true,
-    })
+  it('precedence: running with pending -> only the last dot wears "running" (running > awaiting)', () => {
+    // 0.1.2: the durable badge kinds are gone, so the only remaining
+    // precedence pair is the transient running > awaiting on the newest mark.
+    renderBadge(USERS, { running: true, pending: true })
 
-    expect(badgeOf(1)).toBe('error')
+    expect(badgeOf(1)).toBeNull()
+    expect(badgeOf(USERS.length - 1)).toBeNull()
     expect(badgeOf(USERS.length)).toBe('running')
   })
 })

@@ -21,11 +21,14 @@
  */
 import { render } from '@testing-library/react'
 import { vi } from 'vitest'
+import { SessionSeq } from '@deepseek-ai/dsh-session'
 import { MilestoneRail } from '../client/MilestoneRail.tsx'
 import type { MilestoneRailProps } from '../client/MilestoneRail.tsx'
 import { createBookmarksStore } from '../client/bookmarkStore.ts'
 import { zh } from '../client/locales.ts'
-import type { ConversationSnapshotFixture } from './snapshot-fixture.ts'
+import type { MilestoneMessageEntry, MilestoneMessagesView, MilestoneTurnMeta } from '../projection/milestone-messages'
+import { extractText } from '../client/rail-logic.ts'
+import type { ConversationSnapshotFixture, FixtureTextBlock } from './snapshot-fixture.ts'
 import { buildSnapshot } from './snapshot-fixture.ts'
 
 /** Locale interpreter: looks up `key` in `dict`, falling back to the key; substitutes `{name}` slots from `params`. */
@@ -94,6 +97,37 @@ function createStorage(backing: Map<string, string>): Storage {
 }
 
 /**
+ * 0.1.2: derive the `milestone.messages` projection view from the legacy
+ * fixture snapshot — the rail now reads conversation content exclusively
+ * through `useProjection('milestone.messages')`; `useSession` carries the
+ * lifecycle fields only.
+ */
+export function projectionFromSnapshot(snapshot: ConversationSnapshotFixture): MilestoneMessagesView {
+  const messages: MilestoneMessageEntry[] = []
+  const turns: MilestoneTurnMeta[] = []
+  const turnSeen = new Set<number>()
+  for (const key of snapshot.chat.order) {
+    const node = snapshot.chat.nodes.get(key)
+    if (node === undefined || node.kind !== 'user') continue
+    const data = node.data as { seq: number; time: number; content: readonly FixtureTextBlock[] }
+    const turn = node.location.turn.turn
+    const text = extractText(data.content)
+    messages.push({
+      seq: SessionSeq(data.seq),
+      time: data.time,
+      turn,
+      preview: text.slice(0, 80),
+      text,
+    })
+    if (!turnSeen.has(turn)) {
+      turnSeen.add(turn)
+      turns.push({ turn, startSeq: SessionSeq(data.seq), startTime: data.time })
+    }
+  }
+  return { messages, turns }
+}
+
+/**
  * Render the rail over a fixture conversation.
  * @param users - user messages in conversation order (one mark + one anchor
  *   row each); the `text` is the full message body (search matches on it).
@@ -114,9 +148,13 @@ export function renderRail(
   },
 ) {
   const snapshot = buildSnapshot({ users })
-  const useSession: RailTestProps['useSession'] = (selector) => selector(snapshot)
+  const projection = projectionFromSnapshot(snapshot)
+  // 0.1.2: useSession exposes lifecycle state; the fixture's legacy `pending`
+  // array is mapped onto the new `queue` field the rail reads for awaitingInput.
+  const useSession: RailTestProps['useSession'] = (selector) => selector({ ...snapshot, queue: snapshot.pending })
   const loadOlder = vi.fn(async () => {})
-  const useProjection: RailTestProps['useProjection'] = () => undefined
+  const useProjection: RailTestProps['useProjection'] = (key) =>
+    key === 'milestone.messages' ? projection : undefined
   const t: TInterp = opts?.t ?? makeT(zh as Record<string, string>)
   const forkAt = opts?.forkAt ?? vi.fn(async () => 'child-id')
   // P3: cross-session search defaults to an empty ok result; openSession
@@ -153,7 +191,9 @@ export function renderRail(
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
         {users.map((user) => (
-          <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+          // 0.1.2: rail marks are keyed by the message's event seq string, so
+          // the anchor rows must carry `data-chat-anchor-key` = seq as well.
+          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
             {user.text}
           </div>
         ))}

@@ -28,9 +28,9 @@ import { renderRail } from '../test/renderRail.tsx'
 import type { RailUser } from '../test/renderRail.tsx'
 
 const USERS: RailUser[] = [
-  { key: '13:user<bm-1>', seq: 1, time: 1_700_000_000_000, text: '第一条消息' },
-  { key: '13:user<bm-2>', seq: 2, time: 1_700_000_060_000, text: '第二条消息' },
-  { key: '13:user<bm-3>', seq: 3, time: 1_700_000_120_000, text: '第三条消息' },
+  { key: '1', seq: 1, time: 1_700_000_000_000, text: '第一条消息' },
+  { key: '2', seq: 2, time: 1_700_000_060_000, text: '第二条消息' },
+  { key: '3', seq: 3, time: 1_700_000_120_000, text: '第三条消息' },
 ]
 
 /** Persist key the real store engine writes (prefix + `create('fixture')` scope). */
@@ -99,15 +99,15 @@ describe('MilestoneRail bookmarks', () => {
     fireEvent.click(star)
 
     // The real store engine persisted synchronously under the fixture scope key.
-    expect(backing.get(PERSIST_KEY)).toBe(JSON.stringify({ keys: [USERS[0].key] }))
+    expect(backing.get(PERSIST_KEY)).toBe(JSON.stringify({ keys: [String(USERS[0].seq)] }))
     expect(star).toHaveAttribute('data-starred', 'true')
     expect(star).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('a seeded bookmark survives reload: the blue dot is marked without hovering', () => {
-    const { backing } = renderRail(USERS, { bookmarks: [USERS[0].key] })
+    const { backing } = renderRail(USERS, { bookmarks: [String(USERS[0].seq)] })
 
-    expect(backing.get(PERSIST_KEY)).toBe(JSON.stringify({ keys: [USERS[0].key] }))
+    expect(backing.get(PERSIST_KEY)).toBe(JSON.stringify({ keys: [String(USERS[0].seq)] }))
 
     expect(dotSpan(1)).toHaveAttribute('data-bookmarked', 'true')
     expect(dotSpan(2)).not.toHaveAttribute('data-bookmarked')
@@ -115,7 +115,7 @@ describe('MilestoneRail bookmarks', () => {
   })
 
   it('the bookmarks-only filter hides non-bookmarked dots and stays active', () => {
-    renderRail(USERS, { bookmarks: [USERS[0].key] })
+    renderRail(USERS, { bookmarks: [String(USERS[0].seq)] })
     expandToolbar()
 
     const toggle = bookmarksToggle()
@@ -140,7 +140,7 @@ describe('MilestoneRail bookmarks', () => {
   })
 
   it('the search N/M counter reflects the bookmarked total while filtering', () => {
-    renderRail(USERS, { bookmarks: [USERS[0].key] })
+    renderRail(USERS, { bookmarks: [String(USERS[0].seq)] })
     expandToolbar()
 
     fireEvent.click(bookmarksToggle())

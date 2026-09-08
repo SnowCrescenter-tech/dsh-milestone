@@ -1,27 +1,24 @@
 /**
- * RED component tests for the milestone rail's richer hover-tooltip metadata
+ * Component tests for the milestone rail's richer hover-tooltip metadata
  * (C2): the tooltip shows which model answered the turn, the request purpose,
- * and the token usage, all derived from the turn's `assistant-step` node
- * (`data.finalNode.usage` / `provenance` / `requestConfig`).
+ * and the token usage.
  *
- * The feature is NOT implemented yet — `HoverInfo` carries no model/purpose/
- * token labels and the tooltip renders no metadata row. These tests assert the
- * data contract the implementation WILL ship and therefore FAIL for the right
- * reason: the `data-model` / `data-purpose` / `data-tokens` spans are missing
- * from the rendered tooltip DOM.
+ * 0.1.2 data contract: the tooltip reads the `milestone.messages` projection's
+ * per-turn fold state (`deriveTurnMetaFromProjection`). The fold carries token
+ * usage; provider / model provenance is not folded yet, so model / purpose
+ * degrade to null and their spans stay absent.
  *
  * Contract asserted:
- *   - hovering a dot whose turn has assistant-step metadata renders a metadata
- *     row whose spans carry `data-model` (the requestConfig/provenance model),
- *     `data-purpose` (the requestConfig purpose), and `data-tokens`
- *     (`"<input> / <output> tok"` when BOTH token counts are known)
- *   - hovering a dot whose turn has NO assistant metadata renders NO metadata
- *     row — all three `data-*` spans stay absent
+ *   - hovering a dot whose turn has projection usage renders a metadata row
+ *     whose span carries `data-tokens` (`"<input> / <output> tok"` when BOTH
+ *     token counts are known); `data-model` / `data-purpose` never render
+ *   - hovering a dot whose turn has NO usage renders NO metadata row — all
+ *     three `data-*` spans stay absent
  *
  * renderRail (src/test/renderRail.tsx) only feeds user messages into the
  * snapshot, so this file mirrors its scaffold with a local renderTooltip
  * helper that also passes `assistants` / `trajectory` / `userTurns` into
- * buildSnapshot.
+ * buildSnapshot and can stamp per-turn usage onto the projection.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
@@ -35,6 +32,8 @@ import type {
   FixtureTrajectoryView,
 } from '../test/snapshot-fixture.ts'
 import { buildSnapshot } from '../test/snapshot-fixture.ts'
+import { projectionFromSnapshot } from '../test/renderRail.tsx'
+import type { MilestoneMessagesView } from '../projection/milestone-messages'
 
 /** Locale interpreter mirroring renderRail's: dictionary lookup with `{name}` slot substitution. */
 function makeT(dict: Record<string, string>) {
@@ -76,6 +75,12 @@ interface RenderTooltipOptions {
   userTurns?: number[]
   assistants?: FixtureAssistant[]
   trajectory?: FixtureTrajectoryView
+  /**
+   * 0.1.2: per-turn token usage the `milestone.messages` projection fold
+   * carries (the tooltip's token row reads it; model/purpose are not folded
+   * yet and degrade to null).
+   */
+  turnUsage?: { input: number; output: number; total: number }
 }
 
 /**
@@ -90,10 +95,19 @@ function renderTooltip(opts: RenderTooltipOptions) {
     assistants: opts.assistants,
     trajectory: opts.trajectory,
   })
+  // 0.1.2: useSession carries lifecycle state (the fixture's legacy `pending`
+  // mapped onto the new `queue` field); conversation content comes from the
+  // `milestone.messages` projection derived from the snapshot.
   const useSession: (selector: (s: ConversationSnapshotFixture) => unknown) => unknown = (selector) =>
-    selector(snapshot)
+    selector({ ...snapshot, queue: snapshot.pending })
   const loadOlder = vi.fn(async () => {})
   const forkAt = vi.fn(async () => 'child-id')
+  const view = projectionFromSnapshot(snapshot)
+  const projection: MilestoneMessagesView =
+    opts.turnUsage !== undefined
+      ? { messages: view.messages, turns: view.turns.map((t) => ({ ...t, usage: opts.turnUsage! })) }
+      : view
+  const useProjection = (key: string) => (key === 'milestone.messages' ? projection : undefined)
 
   const backing = new Map<string, string>()
   vi.stubGlobal('localStorage', createStorage(backing))
@@ -102,7 +116,7 @@ function renderTooltip(opts: RenderTooltipOptions) {
   const props = {
     useSession,
     sessionId: 'fixture',
-    useProjection: () => undefined,
+    useProjection,
     loadOlder,
     useStore: (selector: (s: { keys: string[] }) => unknown) => selector(store.getSnapshot()),
     actions: store.actions,
@@ -114,7 +128,9 @@ function renderTooltip(opts: RenderTooltipOptions) {
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
         {opts.users.map((user) => (
-          <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+          // 0.1.2: rail marks are keyed by the message's event seq string, so
+          // the anchor rows must carry `data-chat-anchor-key` = seq as well.
+          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
             {user.text}
           </div>
         ))}
@@ -144,7 +160,7 @@ function metaSpan(attr: string): HTMLElement {
 }
 
 describe('MilestoneRail tooltip metadata', () => {
-  it('shows model / purpose / token usage for a turn with assistant-step metadata', () => {
+  it('shows token usage for a turn with assistant-step metadata (model/purpose degrade to null in 0.1.2)', () => {
     renderTooltip({
       users: USERS,
       assistants: [
@@ -156,13 +172,19 @@ describe('MilestoneRail tooltip metadata', () => {
           requestConfig: { provider: 'deepseek', model: 'v4', purpose: 'continue' },
         },
       ],
+      // 0.1.2: the tooltip's token row reads the projection fold's per-turn
+      // usage (the assistant-step node is no longer the metadata source).
+      turnUsage: { input: 100, output: 50, total: 150 },
     })
 
     fireEvent.mouseEnter(screen.getByRole('button', { name: '跳转到第 1 条消息' }))
 
-    expect(metaSpan('model')).toHaveAttribute('data-model', 'v4')
-    expect(metaSpan('purpose')).toHaveAttribute('data-purpose', 'continue')
     expect(metaSpan('tokens')).toHaveAttribute('data-tokens', '100 / 50 tok')
+    // 0.1.2: the fold does not (yet) carry provider/model provenance, so the
+    // model / purpose spans must NOT render even when the assistant step
+    // recorded them.
+    expect(document.querySelector('[data-model]')).toBeNull()
+    expect(document.querySelector('[data-purpose]')).toBeNull()
   })
 
   it('renders no metadata row when the turn has no assistant metadata', () => {

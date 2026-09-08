@@ -33,6 +33,7 @@ import { createBookmarksStore } from './bookmarkStore.ts'
 import { zh } from './locales.ts'
 import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
 import { buildSnapshot } from '../test/snapshot-fixture.ts'
+import { projectionFromSnapshot } from '../test/renderRail.tsx'
 
 /** Locale interpreter mirroring renderRail's: dictionary lookup with `{name}` slot substitution. */
 function makeT(dict: Record<string, string>) {
@@ -81,8 +82,7 @@ interface RenderGroupsOptions {
  */
 function renderGroups(opts: RenderGroupsOptions) {
   const snapshot = buildSnapshot({ users: opts.users, userTurns: opts.userTurns })
-  const useSession: (selector: (s: ConversationSnapshotFixture) => unknown) => unknown = (selector) =>
-    selector(snapshot)
+  const useSession: (selector: (s: ConversationSnapshotFixture) => unknown) => unknown = (selector) => selector({ ...snapshot, queue: snapshot.pending })
   const loadOlder = vi.fn(async () => {})
   const forkAt = vi.fn(async () => 'child-id')
 
@@ -93,7 +93,7 @@ function renderGroups(opts: RenderGroupsOptions) {
   const props = {
     useSession,
     sessionId: 'fixture',
-    useProjection: () => undefined,
+    useProjection: (key: string) => (key === 'milestone.messages' ? projectionFromSnapshot(snapshot) : undefined),
     loadOlder,
     useStore: (selector: (s: { keys: string[] }) => unknown) => selector(store.getSnapshot()),
     actions: store.actions,
@@ -105,7 +105,7 @@ function renderGroups(opts: RenderGroupsOptions) {
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
         {opts.users.map((user) => (
-          <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
             {user.text}
           </div>
         ))}

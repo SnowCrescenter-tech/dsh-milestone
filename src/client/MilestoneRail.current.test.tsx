@@ -64,9 +64,12 @@ describe('MilestoneRail current-position highlight (F2)', () => {
     mockScrollGeometry()
     // All rows below the viewport top (scrollport-relative 0): currentIndexOf
     // falls back to the FIRST row until scrolling pulls one to the top.
-    rowTops.set('13:user<cur-1>', 100)
-    rowTops.set('13:user<cur-2>', 300)
-    rowTops.set('13:user<cur-3>', 500)
+    // 0.1.2: anchor rows carry `data-chat-anchor-key` = the message's event
+    // seq string, so the geometry table is keyed by that seq (matching the
+    // rail's own mark keys from the `milestone.messages` projection).
+    rowTops.set('1', 100)
+    rowTops.set('2', 300)
+    rowTops.set('3', 500)
     renderRail(USERS)
 
     const scrollport = document.querySelector<HTMLElement>('[data-conversation-scroll]')
@@ -78,9 +81,9 @@ describe('MilestoneRail current-position highlight (F2)', () => {
     expect(dot(3)).not.toHaveAttribute('data-current')
 
     // Scrolled down: rows 1-2 passed above the top, row 2 now sits at it.
-    rowTops.set('13:user<cur-1>', -250)
-    rowTops.set('13:user<cur-2>', -50)
-    rowTops.set('13:user<cur-3>', 150)
+    rowTops.set('1', -250)
+    rowTops.set('2', -50)
+    rowTops.set('3', 150)
     fireEvent.scroll(scrollport)
 
     expect(dot(2)).toHaveAttribute('data-current', 'true')
@@ -88,9 +91,9 @@ describe('MilestoneRail current-position highlight (F2)', () => {
     expect(dot(3)).not.toHaveAttribute('data-current')
 
     // Scrolled further: row 3 is now the one at/just above the top.
-    rowTops.set('13:user<cur-1>', -450)
-    rowTops.set('13:user<cur-2>', -250)
-    rowTops.set('13:user<cur-3>', -50)
+    rowTops.set('1', -450)
+    rowTops.set('2', -250)
+    rowTops.set('3', -50)
     fireEvent.scroll(scrollport)
 
     expect(dot(3)).toHaveAttribute('data-current', 'true')

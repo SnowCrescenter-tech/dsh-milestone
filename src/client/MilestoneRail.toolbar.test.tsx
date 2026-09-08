@@ -38,7 +38,7 @@ import { DEFAULT_PREFS, TOOLBAR_PIN_IDS, TOOLBAR_PREFS_KEY } from './toolbar-pre
 import { PLUGIN_NPM_URL, PLUGIN_REPO_URL } from './version-meta.ts'
 import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
 import { buildSnapshot } from '../test/snapshot-fixture.ts'
-import type { RailUser } from '../test/renderRail.tsx'
+import { projectionFromSnapshot, type RailUser } from '../test/renderRail.tsx'
 
 const USERS: RailUser[] = [
   { key: '13:user<tb-1>', seq: 1, time: 1_700_000_000_000, text: '第一条消息' },
@@ -81,9 +81,13 @@ function createStorage(backing: Map<string, string>): Storage {
 /** Render the rail with an optional pre-seeded toolbar prefs blob. */
 function renderToolbarRail(users: RailUser[] = USERS, opts?: { prefs?: string }) {
   const snapshot = buildSnapshot({ users })
-  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) => selector(snapshot)
+  // 0.1.2: conversation content comes through the `milestone.messages`
+  // projection; useSession carries lifecycle fields only (queue ← pending).
+  const projection = projectionFromSnapshot(snapshot)
+  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) =>
+    selector({ ...snapshot, queue: snapshot.pending })
   const loadOlder = vi.fn(async () => {})
-  const useProjection = () => undefined
+  const useProjection = (key?: string) => (key === 'milestone.messages' ? projection : undefined)
   const t = makeT(zh as Record<string, string>)
   const forkAt = vi.fn(async () => 'child-id')
 
@@ -110,7 +114,9 @@ function renderToolbarRail(users: RailUser[] = USERS, opts?: { prefs?: string })
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
         {users.map((user) => (
-          <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+          // 0.1.2: rail marks are keyed by the message's event seq string, so
+          // the anchor rows must carry `data-chat-anchor-key` = seq as well.
+          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
             {user.text}
           </div>
         ))}

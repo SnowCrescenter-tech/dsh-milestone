@@ -93,7 +93,7 @@ describe('MilestoneRail deep links (P3)', () => {
   it('mounting with a #msg= hash scrolls the target row into view after the deferred start', () => {
     vi.useFakeTimers()
     const spy = vi.spyOn(Element.prototype, 'scrollIntoView')
-    window.location.hash = buildMessageHash(USERS[1].key)
+    window.location.hash = buildMessageHash(String(USERS[1].seq))
     const rail = renderRail(USERS)
 
     // The jump is deferred (it must land AFTER the harness's own
@@ -106,7 +106,7 @@ describe('MilestoneRail deep links (P3)', () => {
 
     expect(spy).toHaveBeenCalled()
     const jumped = spy.mock.instances.at(-1) as HTMLElement | undefined
-    expect(jumped?.dataset.chatAnchorKey).toBe(USERS[1].key)
+    expect(jumped?.dataset.chatAnchorKey).toBe(String(USERS[1].seq))
     // In-window marks never trigger the load-older fallback.
     expect(rail.loadOlder).not.toHaveBeenCalled()
   })
@@ -119,27 +119,27 @@ describe('MilestoneRail deep links (P3)', () => {
     fireEvent.click(dot(2))
 
     expect(replaceSpy).toHaveBeenCalled()
-    expect(replaceSpy.mock.calls.at(-1)?.[2]).toBe(buildMessageHash(USERS[1].key))
+    expect(replaceSpy.mock.calls.at(-1)?.[2]).toBe(buildMessageHash(String(USERS[1].seq)))
     const jumped = scrollSpy.mock.instances.at(-1) as HTMLElement | undefined
-    expect(jumped?.dataset.chatAnchorKey).toBe(USERS[1].key)
+    expect(jumped?.dataset.chatAnchorKey).toBe(String(USERS[1].seq))
   })
 
   it('jumps when the hash changes to a known mark (manual URL edit)', () => {
     const spy = vi.spyOn(Element.prototype, 'scrollIntoView')
     renderRail(USERS)
 
-    window.location.hash = buildMessageHash(USERS[2].key)
+    window.location.hash = buildMessageHash(String(USERS[2].seq))
     window.dispatchEvent(new HashChangeEvent('hashchange'))
 
     const jumped = spy.mock.instances.at(-1) as HTMLElement | undefined
-    expect(jumped?.dataset.chatAnchorKey).toBe(USERS[2].key)
+    expect(jumped?.dataset.chatAnchorKey).toBe(String(USERS[2].seq))
   })
 
   it('polls for a known mark whose row is not rendered, calls loadOlder once, then gives up silently', async () => {
     vi.useFakeTimers()
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
-    window.location.hash = buildMessageHash(USERS[1].key)
-    const { loadOlder } = renderRailRowless(USERS, [USERS[0].key])
+    window.location.hash = buildMessageHash(String(USERS[1].seq))
+    const { loadOlder } = renderRailRowless(USERS, [String(USERS[0].seq)])
 
     // Phase A: initial delay + 5 polls — the row never appears.
     await act(async () => {

@@ -31,6 +31,7 @@ import type { MilestoneRailProps } from './MilestoneRail.tsx'
 import { createBookmarksStore } from './bookmarkStore.ts'
 import { buildSnapshot } from '../test/snapshot-fixture.ts'
 import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
+import { projectionFromSnapshot } from '../test/renderRail.tsx'
 
 afterEach(() => {
   cleanup()
@@ -149,11 +150,17 @@ function renderLiveRail(users: RailUser[], olderPages: RailUser[][]) {
       [users, olderPages],
     )
     const useSession: (selector: (s: ConversationSnapshotFixture) => unknown) => unknown = (selector) =>
-      selector(snap)
+      // 0.1.2: useSession carries lifecycle state (the fixture's legacy
+      // `pending` mapped onto the new `queue` field).
+      selector({ ...snap, queue: snap.pending })
+    // 0.1.2: conversation content comes from the `milestone.messages`
+    // projection derived from the LIVE snapshot — as loadOlder prepends older
+    // pages, the projection (and thus the panel's marks) grows with them.
+    const useProjection = (key: string) => (key === 'milestone.messages' ? projectionFromSnapshot(snap) : undefined)
     const props = {
       useSession,
       sessionId: 'fixture',
-      useProjection: () => undefined,
+      useProjection,
       loadOlder,
       useStore: (selector: (snap: { keys: string[] }) => unknown) => selector(store.getSnapshot()),
       actions: store.actions,
@@ -166,7 +173,9 @@ function renderLiveRail(users: RailUser[], olderPages: RailUser[][]) {
       <div data-conversation-scroll>
         <div style={{ height: 400 }}>
           {olderAll.concat(users).map((user) => (
-            <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+            // 0.1.2: rail marks are keyed by the message's event seq string,
+            // so the anchor rows must carry `data-chat-anchor-key` = seq too.
+            <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
               {user.text}
             </div>
           ))}
@@ -224,13 +233,13 @@ describe('MilestoneRail milestone list panel (P3)', () => {
 
     // The second entry carries its mark key and jumps to the anchor row.
     const target = items()[1]
-    expect(target).toHaveAttribute('data-jump-key', USERS[1].key)
+    expect(target).toHaveAttribute('data-jump-key', String(USERS[1].seq))
 
     fireEvent.click(target)
 
     expect(spy).toHaveBeenCalled()
     const jumpedRow = spy.mock.instances.at(-1) as HTMLElement | undefined
-    expect(jumpedRow?.dataset.chatAnchorKey).toBe(USERS[1].key)
+    expect(jumpedRow?.dataset.chatAnchorKey).toBe(String(USERS[1].seq))
   })
 
   it('Escape or re-clicking the toggle closes the panel', () => {

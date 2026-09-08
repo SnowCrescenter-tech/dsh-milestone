@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { createOpenSession, createSessionSearch } from './railInject'
 import type { SessionSearchLike, SessionSearchRpcResult } from './railInject'
 
@@ -10,9 +11,9 @@ import type { SessionSearchLike, SessionSearchRpcResult } from './railInject'
  */
 function makeSessions(options: {
   result?:
-    | { ok: true; value: { items: Array<{ sessionId: string; snippet: string }>; hasMore: boolean } }
+    | { ok: true; value: { items: Array<{ sessionId: SessionId; snippet: string }>; hasMore: boolean } }
     | { ok: false; error: { message: string } }
-  byId?: Record<string, { displayTitle: string }>
+  byId?: Record<SessionId, { title?: string }>
   reject?: unknown
 } = {}) {
   const open = vi.fn()
@@ -29,17 +30,17 @@ describe('createSessionSearch', () => {
   it('unwraps an ok result and joins each hit with its display title from the session list', async () => {
     const { sessions, search, listGet } = makeSessions({
       byId: {
-        s1: { displayTitle: '会话一' },
-        s2: { displayTitle: '会话二' },
+        [SessionId('s1')]: { title: '会话一' },
+        [SessionId('s2')]: { title: '会话二' },
       },
       result: {
         ok: true,
         value: {
           items: [
-            { sessionId: 's1', snippet: '…snippet-1…' },
-            { sessionId: 's2', snippet: '…snippet-2…' },
+            { sessionId: SessionId('s1'), snippet: '…snippet-1…' },
+            { sessionId: SessionId('s2'), snippet: '…snippet-2…' },
             // Not in the list store — the title must stay undefined.
-            { sessionId: 's3', snippet: '…snippet-3…' },
+            { sessionId: SessionId('s3'), snippet: '…snippet-3…' },
           ],
           hasMore: true,
         },
@@ -49,9 +50,9 @@ describe('createSessionSearch', () => {
 
     await expect(searchSessions('rust', new AbortController().signal)).resolves.toEqual({
       items: [
-        { sessionId: 's1', snippet: '…snippet-1…', title: '会话一' },
-        { sessionId: 's2', snippet: '…snippet-2…', title: '会话二' },
-        { sessionId: 's3', snippet: '…snippet-3…', title: undefined },
+        { sessionId: SessionId('s1'), snippet: '…snippet-1…', title: '会话一' },
+        { sessionId: SessionId('s2'), snippet: '…snippet-2…', title: '会话二' },
+        { sessionId: SessionId('s3'), snippet: '…snippet-3…', title: undefined },
       ],
       hasMore: true,
     })
@@ -92,9 +93,9 @@ describe('createOpenSession', () => {
   it('delegates to sessions.open with the given id', () => {
     const { sessions, open } = makeSessions()
 
-    createOpenSession(sessions)('s1')
+    createOpenSession(sessions)(SessionId('s1'))
 
     expect(open).toHaveBeenCalledTimes(1)
-    expect(open).toHaveBeenCalledWith('s1')
+    expect(open).toHaveBeenCalledWith(SessionId('s1'))
   })
 })

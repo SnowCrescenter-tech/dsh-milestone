@@ -23,6 +23,7 @@ import { DEFAULT_PREFS, TOOLBAR_PREFS_KEY } from './toolbar-prefs.ts'
 import type { ConversationSnapshotFixture } from '../test/snapshot-fixture.ts'
 import { buildSnapshot } from '../test/snapshot-fixture.ts'
 import type { RailUser } from '../test/renderRail.tsx'
+import { projectionFromSnapshot } from '../test/renderRail.tsx'
 
 const USERS: RailUser[] = [
   { key: '13:user<st-1>', seq: 1, time: 1_700_000_000_000, text: '第一条消息' },
@@ -65,9 +66,14 @@ function createStorage(backing: Map<string, string>): Storage {
 /** Render the rail with an optional pre-seeded prefs blob. */
 function renderSettingsRail(opts?: { prefs?: string }) {
   const snapshot = buildSnapshot({ users: USERS })
-  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) => selector(snapshot)
+  // 0.1.2: useSession exposes lifecycle state; the fixture's legacy `pending`
+  // array is mapped onto the new `queue` field the rail reads for awaitingInput.
+  const useSession = (selector: (snap: ConversationSnapshotFixture) => unknown) =>
+    selector({ ...snapshot, queue: snapshot.pending })
   const loadOlder = vi.fn(async () => {})
-  const useProjection = () => undefined
+  // 0.1.2: the rail reads conversation content exclusively through
+  // `useProjection('milestone.messages')` — derive the view from the fixture.
+  const useProjection = (key: string) => (key === 'milestone.messages' ? projectionFromSnapshot(snapshot) : undefined)
   const t = makeT(zh as Record<string, string>)
   const forkAt = vi.fn(async () => 'child-id')
 
@@ -94,7 +100,9 @@ function renderSettingsRail(opts?: { prefs?: string }) {
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
         {USERS.map((user) => (
-          <div key={user.key} data-chat-anchor-key={user.key} style={{ height: 48 }}>
+          // 0.1.2: rail marks are keyed by the message's event seq string, so
+          // the anchor rows must carry `data-chat-anchor-key` = seq as well.
+          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
             {user.text}
           </div>
         ))}

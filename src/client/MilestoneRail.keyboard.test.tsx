@@ -154,7 +154,7 @@ describe('MilestoneRail keyboard navigation (RED — feature not implemented)', 
 
     expect(spy).toHaveBeenCalled()
     const jumpedRow = spy.mock.instances.at(-1) as HTMLElement | undefined
-    expect(jumpedRow?.dataset.chatAnchorKey).toBe(USERS[1].key)
+    expect(jumpedRow?.dataset.chatAnchorKey).toBe(String(USERS[1].seq))
   })
 
   it('ArrowDown inside the search input does not move dot focus', async () => {
