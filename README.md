@@ -17,7 +17,7 @@
 
 </div>
 
-> **English:** A Git-style milestone timeline for the DeepSeek Harness web UI — one dot per user message, hover for content and metadata (time, turn, duration, TTFT, tokens), click to jump anywhere. Full-session list, in-session & cross-session search, `#msg=` deep-link bookmarks, keyboard navigation. Install: `dsh plugin --profile demo add dsh-milestone`.
+> **English:** A Git-style milestone timeline for the DeepSeek Harness web UI — one dot per user message, hover for content and metadata (time, turn, duration, TTFT, tokens), click to jump anywhere, and collapse the whole rail into a draggable floating ball. Full-session list, in-session & cross-session search, `#msg=` deep-link bookmarks, keyboard navigation. Install: `dsh plugin --profile demo add dsh-milestone`.
 
 ---
 
@@ -52,13 +52,17 @@ npx @deepseek-ai/dsh web    # → http://127.0.0.1:3080
 
 每个提问一个圆点，点击平滑跳转；悬停即看内容与元信息。圆点等距排列、不随对话长度变形，颜色由浅入深标出先后，同 Git 提交图。滚轮可在里程碑条上直接滑动选点，视口内最近的提问亮起白环。
 
+### 折叠为悬浮球
+
+一键把整条时间线收成一颗半透明悬浮球：**点击**展开，**拖动**可把它放到屏幕任意角落（拖动时不触发展开），松手即记住位置，刷新或下次会话仍在。设置里可选「**固定** / **可拖动**」，也可一键重置位置——右侧被其它面板（如 dsh-better-sidebar、explorer）占用时，把它拖到顺手的地方即可。
+
 ### 全部提问列表
 
-一键打开面板，序号 + 轮次 + 预览一次看全，点击任意一条直接跳转。打开时会**自动加载整个会话**的历史，不用手动翻页——对藏在最早期的消息来说，比在小圆点上逐个找快得多。
+一键打开面板，序号 + 轮次 + 预览一次看全，点击任意一条直接跳转。列表直接来自**整个会话的投影**，不用手动翻页——对藏在最早期的消息来说，比在小圆点上逐个找快得多。
 
 ### 站内搜索
 
-搜索框过滤圆点，匹配的是**完整消息内容**（不是 80 字摘要），实时显示命中数 N/M。`Enter` 跳到下一个匹配，`Esc` 一键清空。
+搜索框过滤圆点，匹配的是**完整消息内容**（不是 80 字摘要）且覆盖**整个会话**（不受对话当前加载窗口限制），实时显示命中数 N/M。`Enter` 跳到下一个匹配，`Esc` 一键清空。
 
 ### 跨会话搜索
 
@@ -70,7 +74,7 @@ npx @deepseek-ai/dsh web    # → http://127.0.0.1:3080
 
 ### 悬停元信息
 
-时间 · 轮次 · 用时 · 结束原因 · TTFT · tok/s · 模型 · 用途 · token 用量，一张卡片看全。数据全部来自 harness 原生会话快照，零额外依赖：
+时间 · 轮次 · 用时 · 结束原因 · TTFT · tok/s · 模型 · 用途 · token 用量，一张卡片看全。数据来自插件自注册的**会话投影**，零额外依赖：
 
 ```
 ┌──────────────────────────────────────────┐
@@ -85,6 +89,7 @@ npx @deepseek-ai/dsh web    # → http://127.0.0.1:3080
 
 - **键盘导航**：`↑↓` 移动 · `Enter` 跳转 · `Home/End` 首尾，全程不用鼠标。
 - **turn 分组折叠**：长轮次折成一条，汇总圆点带可见 ×N 徽标，一眼知道藏着几条。
+- **折叠为悬浮球**：整条时间线收成可拖动的小球，位置记忆、可固定可拖动。
 - **复制与 fork**：一键复制提问全文 / 从此处分支。
 - **聚焦模式**：淡化 / 折叠思考与工具调用，强度可调、自由搭配。
 - **折叠工具栏**：功能键默认收起，常用键可钉到折叠外；搜索 / 列表等浮层点击外部自动关闭。
@@ -97,32 +102,32 @@ npx @deepseek-ai/dsh web    # → http://127.0.0.1:3080
 ```
 shell.overlay (root scope)
   └─ milestone.rail (session scope, 自声明子槽)
-       └─ useSession 读取会话快照 → 圆点列表 + 悬停 + 跳转
+       └─ useProjection('milestone.messages') → 圆点列表 + 悬停 + 跳转
 ```
 
 - **注入点**：`shell.overlay` 全框架浮动层，附加式、点击穿透，不碰现有 UI。
-- **数据源**：harness 原生会话快照（消息列表、turn 元数据、分页与运行状态），无自建抓取。
+- **数据源**：插件自注册的 `milestone.messages` **会话投影**——host 端对完整事件日志做 fold（`turn/start` / `user/message` / `assistant/chunk` / `assistant/message` / `turn/end`），client 端经 `useProjection` 读取整会话的消息与每轮元数据；圆点列表与站内搜索覆盖**整个会话**，与 DOM 当前加载窗口无关。
 - **跳转**：以消息锚点做 DOM 定位，`scrollIntoView` 平滑滚动。
-- **分页**：顶部「···」按需加载更早历史；全部提问列表打开时自动加载整个会话。
-- **持久化**：书签与工具栏偏好经 `store.persist` 按会话写入 localStorage。
-- **纯函数分层**：过滤、位置计算、圆点状态集中在 `rail-logic.ts` 纯函数层，单测覆盖。
+- **分页**：顶部「···」按需把更早的对话载入 DOM（跳转 / 深链接定位所需）；提问列表本身来自投影，无需逐页加载。
+- **持久化**：书签、工具栏偏好与悬浮球位置经 `store.persist` 写入 localStorage。
+- **纯函数分层**：过滤、位置计算、圆点状态、悬浮球几何集中在纯函数层（`rail-logic.ts` / `ball-position.ts`），单测覆盖。
 
 ## 版本与兼容
 
 - 当前官方支持线：**`0.1.2-rc.1`**（与 `@deepseek-ai/dsh` 最新 `latest` 标签一致）。
-- peer/dev 范围采用**双分支**写法 `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-rc.1 <0.2.0-0`：node-semver 的 prerelease 规则会让 `^0.1.1-rc.2` 静默排除 `0.1.2-rc.1`（元组不同），旧写法下升级 harness 的用户会直接 ERESOLVE。
-- 官方客户端包（`dsh-client-runtime` 等）在 npm 上走 `next` 标签发布（`latest` 标签仍是远古版本）；升级 harness 后若发现插件不匹配，请确认安装的依赖解析到了 `0.1.2-rc.1` 线（`dsh-client-runtime` 的 `next` 目前仍为 `0.1.1-rc.2`，属官方发布节奏，不影响）。
+- peer/dev 范围为收紧的 `>=0.1.2-rc.1 <0.3.0-0`（`dsh-client-locale` / `dsh-client-store` / `dsh-client-ui-slots`）：依赖解析到旧线时会得到明确的 ERESOLVE，而不是静默错配。
+- 0.1.2 起会话数据改经**会话投影**提供（插件注册 `milestone.messages`，client 端 `useProjection` 读取）；`dsh-client-runtime` 不再是依赖——`defineStore` 现由 `@deepseek-ai/dsh-client-store` 提供。
 - harness 当前版本在浏览器端没有可信来源（`host.describe().version` 是占位值），因此不做精确探测，以插件声明的支持线为准。
 
 ## 已知限制
 
-> ⚠️ **最需要注意**：站内搜索只覆盖**当前已加载**的消息窗口（初始 50 条），更早的历史需先点顶部「···」加载进来才能被搜到。「全部提问」列表不受此限：打开时会自动加载整个会话，始终一次看全。
+> ⚠️ 圆点列表与站内搜索现由**会话投影**驱动，覆盖**整个会话**，与 DOM 加载窗口无关；但**跳转**到很早的消息仍需先把该消息载入 DOM，插件会自动触发加载再定位。
 
 <details>
 <summary>查看更多已知限制（点击展开）</summary>
 
-- TTFT / tok/s 依赖 turn 位置数据，窗口外或未完成的 turn 不显示（自动隐藏）。
-- 徽章的瞬态状态（运行中 / 等待输入）只点亮最新一条可见提问；该提问在窗口外时无脉冲。
+- TTFT / tok/s 依赖 turn 位置数据，未完成的 turn 不显示（自动隐藏）。
+- 徽章的瞬态状态（运行中 / 等待输入）只点亮最新一条提问。
 - 书签按会话隔离，不跨会话共享。
 - fork 从选中消息所在轮次开始分支，不会自动打开子会话（需在会话列表手动打开）。
 - 深链接目标若早于已加载窗口，会先自动加载更早历史再定位；受加载上限约束，极端深的历史可能定位失败。
@@ -133,7 +138,14 @@ shell.overlay (root scope)
 ## 更新日志
 
 <details>
-<summary>v0.6.6 / v0.6.5 / v0.6.4（点击展开）</summary>
+<summary>v0.7.0 / v0.6.6 / v0.6.5 / v0.6.4（点击展开）</summary>
+
+**v0.7.0** · 跟随官方 0.1.2（会话投影数据层）· 折叠为可拖动悬浮球（issue #4）· 444 项测试
+
+- **跟随官方 0.1.2**：会话数据改由插件自注册的 `milestone.messages` 投影提供——host 端对完整事件日志 fold，client 端 `useProjection` 读取；圆点列表与站内搜索覆盖**整个会话**，与 DOM 加载窗口解耦。`defineStore` 改由 `@deepseek-ai/dsh-client-store` 提供，peer 收紧到 `0.1.2-rc.1` 线，移除 `dsh-client-runtime` 依赖。
+- **折叠为悬浮球（issue #4）**：里程碑条可一键收成半透明悬浮球，自由拖到屏幕任意位置；点击展开、拖动移动（拖动与点击互斥），位置按 localStorage 记忆；设置里可选「固定 / 可拖动」并一键重置位置。
+
+> [GitHub Release v0.7.0](https://github.com/SnowCrescenter-tech/dsh-milestone/releases/tag/v0.7.0)
 
 **v0.6.6** · 全部提问列表自动加载整个会话 · 折叠圆点 ×N 徽标 · 轮次连续显示 · 397 项测试
 
