@@ -111,6 +111,20 @@ describe('MilestoneRail deep links (P3)', () => {
     expect(rail.loadOlder).not.toHaveBeenCalled()
   })
 
+  it('jumps to a row whose anchor is the real harness node key (message-id suffix)', () => {
+    const replaceSpy = vi.spyOn(history, 'replaceState')
+    const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
+    // The rows carry `13:input-message<messageId>`, NOT the seq — the real
+    // 0.1.5 conversation-row vocabulary. Jump must still find the row.
+    renderRail(USERS, { harnessAnchors: true })
+
+    fireEvent.click(dot(2))
+
+    expect(replaceSpy).toHaveBeenCalled()
+    const jumped = scrollSpy.mock.instances.at(-1) as HTMLElement | undefined
+    expect(jumped?.dataset.chatAnchorKey).toBe('13:input-messagemsg-2')
+  })
+
   it('clicking a rail dot scrolls and writes #msg=<key> via history.replaceState', () => {
     const replaceSpy = vi.spyOn(history, 'replaceState')
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')

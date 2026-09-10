@@ -48,6 +48,13 @@ export const MESSAGE_PREVIEW_LIMIT = 80
 export interface MilestoneMessageEntry {
   /** Seq of the `user/message` event — the paging/anchoring target. */
   readonly seq: SessionSeq
+  /**
+   * The `user/message` event's message id. The harness conversation row's
+   * `data-chat-anchor-key` is `conversationContextKey('input-message', id)`,
+   * so this is what maps a rail mark to its DOM row (see MilestoneRail's
+   * `findRow`); the seq alone does NOT appear in the row's attributes.
+   */
+  readonly messageId: string
   /** Event wall-clock time (ms). */
   readonly time: number
   /** Turn the message belongs to (from the open `turn/start`). */
@@ -92,6 +99,7 @@ export interface MilestoneMessagesView {
 
 const messageEntrySchema = z.object({
   seq: z.number().int().nonnegative().transform(SessionSeq),
+  messageId: z.string(),
   time: z.number(),
   turn: z.number().int().nonnegative(),
   preview: z.string().max(MESSAGE_PREVIEW_LIMIT),
@@ -169,7 +177,8 @@ function initialState(): MilestoneMessagesState {
 export const milestoneMessagesProjectionDefinition = {
   key: 'milestone.messages',
   // 2: 0.1.5 fold semantics (embedded stream TTFT; TokenUsage field rename).
-  stateVersion: 2,
+  // 3: message entries carry the `user/message` id (DOM anchor mapping).
+  stateVersion: 3,
   stateSchema: z.custom<MilestoneMessagesState>(),
   init: (_header: SessionHeader, _inheritedEventCount: SessionLogOffset): MilestoneMessagesState => initialState(),
   apply(state: MilestoneMessagesState, event: SessionEvent): MilestoneMessagesState {
@@ -183,7 +192,8 @@ export const milestoneMessagesProjectionDefinition = {
         }
       }
       case 'user/message': {
-        const content = (event.data as { content?: readonly unknown[] }).content ?? []
+        const data = event.data as { id?: unknown; content?: readonly unknown[] }
+        const content = data.content ?? []
         const text = fullText(content)
         const preview = previewText(content, MESSAGE_PREVIEW_LIMIT)
         const openTurn = state.turns[state.turns.length - 1]
@@ -192,6 +202,7 @@ export const milestoneMessagesProjectionDefinition = {
             ...state.messages,
             {
               seq: SessionSeq(event.seq),
+              messageId: typeof data.id === 'string' ? data.id : '',
               time: event.time,
               turn: openTurn?.turn ?? 0,
               preview,

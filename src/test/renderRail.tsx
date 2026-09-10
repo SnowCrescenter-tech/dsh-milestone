@@ -115,6 +115,7 @@ export function projectionFromSnapshot(snapshot: ConversationSnapshotFixture): M
     const text = extractText(data.content)
     messages.push({
       seq: SessionSeq(data.seq),
+      messageId: `msg-${data.seq}`,
       time: data.time,
       turn,
       preview: text.slice(0, 80),
@@ -146,6 +147,12 @@ export function renderRail(
     forkAt?: (atSeq: number) => Promise<string>
     searchSessions?: (query: string, signal: AbortSignal) => Promise<{ items: SessionSearchHit[]; hasMore: boolean }>
     openSession?: (id: string) => void
+    /**
+     * Render the chat rows with the REAL harness anchor format —
+     * `data-chat-anchor-key = '13:input-message' + messageId` — instead of the
+     * legacy `String(seq)`. Exercises `findRow`'s message-id suffix matching.
+     */
+    harnessAnchors?: boolean
     /**
      * Toolbar-prefs seed (`dsh-milestone.toolbar`) written to localStorage
      * BEFORE the rail mounts, so its `useState(loadPrefs)` initializer
@@ -205,7 +212,11 @@ export function renderRail(
         {users.map((user) => (
           // 0.1.2: rail marks are keyed by the message's event seq string, so
           // the anchor rows must carry `data-chat-anchor-key` = seq as well.
-          <div key={user.key} data-chat-anchor-key={String(user.seq)} style={{ height: 48 }}>
+          <div
+            key={user.key}
+            data-chat-anchor-key={opts?.harnessAnchors ? `13:input-messagemsg-${user.seq}` : String(user.seq)}
+            style={{ height: 48 }}
+          >
             {user.text}
           </div>
         ))}

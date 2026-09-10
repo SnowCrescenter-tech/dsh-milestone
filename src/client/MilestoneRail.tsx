@@ -355,6 +355,8 @@ interface MilestoneMark {
   readonly key: string
   readonly turn: number | undefined
   readonly seq: number
+  /** The `user/message` id — matches the row's `data-chat-anchor-key` suffix. */
+  readonly messageId: string
   readonly time: number
   /** FULL plain text of the message — the search corpus (never truncated). */
   readonly text: string
@@ -501,9 +503,20 @@ interface TrajectoryViewLike {
  * Find a chat row by its node key, avoiding CSS.escape pitfalls on keys that
  * contain `<`/`>`/`:` (the node key is `13:input-message<messageId>`).
  */
-function findRow(key: string): HTMLElement | null {
-  for (const row of document.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')) {
+function findRow(key: string, messageId?: string): HTMLElement | null {
+  const rows = document.querySelectorAll<HTMLElement>('[data-chat-anchor-key]')
+  // Exact first: test/legacy renderers set the anchor to the mark key itself.
+  for (const row of rows) {
     if (row.dataset.chatAnchorKey === key) return row
+  }
+  // Real harness: the row's anchor is `conversationContextKey('input-message',
+  // <message id>)` (e.g. `13:input-message<uuid>`), so match the unique id
+  // suffix. A non-empty id is required — never suffix-match on an empty string.
+  if (messageId !== undefined && messageId !== '') {
+    for (const row of rows) {
+      const anchor = row.dataset.chatAnchorKey
+      if (anchor !== undefined && anchor.endsWith(messageId)) return row
+    }
   }
   return null
 }
@@ -566,16 +579,17 @@ export function MilestoneRail({
   const bookmarkedKeys = useStore?.((s) => s.keys) ?? NO_BOOKMARKS
 
   // Ordered user-message dots, from the projection (every user/message event
-  // in the whole log — no loaded-window limit). `key` is the event seq string:
-  // 0.1.2 conversation rows expose `data-chat-turn` (turn-level) but no
-  // message-level seq attribute, so jumps target the turn; precise per-message
-  // anchoring is a follow-up once the row anchor vocabulary is verified.
+  // in the whole log — no loaded-window limit). `key` is the event seq string
+  // (the mark's stable identity and deep-link payload); `messageId` is the
+  // `user/message` id, which is what the conversation row's
+  // `data-chat-anchor-key` is built from, so it is the DOM jump handle.
   const marks = useMemo<MilestoneMark[]>(() => {
     const messages: readonly MilestoneMessageEntry[] = projection?.messages ?? EMPTY_PROJECTION_MESSAGES
     return messages.map((m) => ({
       key: String(m.seq),
       turn: m.turn,
       seq: m.seq as number,
+      messageId: m.messageId,
       time: m.time,
       text: m.text,
       preview: m.preview,
@@ -643,8 +657,8 @@ export function MilestoneRail({
    * rail's own updates. No-op when the row is not (yet) rendered — the
    * deep-link mount retry and the load-older flow cover that case.
    */
-  const jump = (key: string): void => {
-    const row = findRow(key)
+  const jump = (key: string, messageId?: string): void => {
+    const row = findRow(key, messageId)
     if (row === null) return
     row.scrollIntoView({ behavior: 'smooth', block: 'start' })
     history.replaceState(null, '', buildMessageHash(key))
@@ -994,14 +1008,15 @@ export function MilestoneRail({
     let timer: number | undefined
     const attempt = (pollsLeft: number, canLoadOlder: boolean): void => {
       if (cancelled) return
-      if (findRow(key) !== null) {
-        jump(key)
+      const mark = marksRef.current.find((m) => m.key === key)
+      if (findRow(key, mark?.messageId) !== null) {
+        jump(key, mark?.messageId)
         return
       }
       // The session settled without this mark — the link is stale for this
       // session; give up silently. Empty marks mean the session is still
       // loading, so those keep polling.
-      if (marksRef.current.length > 0 && !marksRef.current.some((m) => m.key === key)) return
+      if (marksRef.current.length > 0 && mark === undefined) return
       if (pollsLeft > 0) {
         timer = window.setTimeout(() => attempt(pollsLeft - 1, canLoadOlder), DEEP_LINK_POLL_DELAY)
         return
@@ -1036,7 +1051,8 @@ export function MilestoneRail({
     const onHashChange = (): void => {
       const key = parseDeepLinkHash(window.location.hash)
       if (key === null) return
-      if (marksRef.current.some((m) => m.key === key)) jump(key)
+      const mark = marksRef.current.find((m) => m.key === key)
+      if (mark !== undefined) jump(key, mark.messageId)
     }
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
@@ -1147,7 +1163,8 @@ export function MilestoneRail({
     if (matches.length === 0) return
     const next = nextMatchIndex(search.activePos, matches.length, 1)
     setSearch((s) => ({ ...s, activePos: next }))
-    jump(displayMarks[matches[next]].key)
+    const mark = displayMarks[matches[next]]
+    jump(mark.key, mark.messageId)
   }
 
   const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
@@ -2957,7 +2974,7 @@ export function MilestoneRail({
                   const rect = e.currentTarget.getBoundingClientRect()
                   setHover({ ...buildHover(mark, item.displayIndex), top: rect.top + rect.height / 2 })
                 }}
-                onClick={() => jump(mark.key)}
+                onClick={() => jump(mark.key, mark.messageId)}
                 data-rail-dot
                 data-turn-gap={showGroupGap ? 'true' : undefined}
                 data-turn={showGroupGap && mark.turn !== undefined ? mark.turn : undefined}

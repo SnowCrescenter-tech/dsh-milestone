@@ -35,6 +35,17 @@ describe('milestone.messages projection', () => {
     expect(state.turns[0]).toMatchObject({ turn: 1, startSeq: 0, startTime: 1000 })
   })
 
+  it('captures the user/message id for conversation-row anchor mapping', () => {
+    const state = fold([
+      event('turn/start', 0, 1000, { turn: 1 }),
+      event('user/message', 1, 1001, { id: 'm-1', content: [{ type: 'text', text: 'q' }] }),
+      // A malformed event without an id degrades to '' (never undefined/NaN).
+      event('user/message', 3, 1003, { content: [{ type: 'text', text: 'no-id' }] }),
+    ])
+    expect(state.messages[0].messageId).toBe('m-1')
+    expect(state.messages[1].messageId).toBe('')
+  })
+
   it('closes turn metadata with end time and reason', () => {
     const state = fold([
       event('turn/start', 0, 1000, { turn: 2 }),
