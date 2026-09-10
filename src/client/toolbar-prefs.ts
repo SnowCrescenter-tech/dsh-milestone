@@ -2,7 +2,8 @@
  * toolbar-prefs: the persistence layer for the milestone rail's toolbar
  * personalization — WHICH function keys stay visible outside the collapse
  * (pinned) plus the settings-module appearance prefs (accent color, icon/dot
- * size, distance from the rail's screen edge, and rail side).
+ * size, distance from the rail's screen edge, rail side) and the collapsed
+ * rail's floating ball (mode + last position).
  *
  * Storage contract: one localStorage key (`dsh-milestone.toolbar`) holding a
  * JSON object:
@@ -10,13 +11,17 @@
  *   { "pinned": string[], "accent": "#rrggbb", "iconSize": number,
  *     "inset": number, "side": "left" | "right", "locale": "system"|"zh"|"en",
  *     "focus": { "dimThink": boolean, "dimTools": boolean,
- *                "collapseThink": boolean, "opacity": number } }
+ *                "collapseThink": boolean, "opacity": number },
+ *     "ballMode": "fixed" | "draggable",
+ *     "ball": { "x": number, "y": number } | null }
  *
  * Backward compatibility: the pre-personalization blob `{ "pinned": string[] }`
  * (and an entirely absent value) parses to the DEFAULT prefs with the new
  * fields at their defaults — old users keep their pins untouched. The same
  * rule covers the `focus` object: a blob stored before 0.6.3 (no `focus`
- * field) gains the default focus mix.
+ * field) gains the default focus mix, and a blob stored before the floating
+ * ball (no `ballMode` / `ball`) gains `ballMode: 'draggable'` + `ball: null`
+ * (the computed default resting spot).
  *
  * All reads are sanitized per field:
  *   - `pinned`: whitelisted ids only (`TOOLBAR_PIN_IDS`), duplicates dropped,
@@ -28,13 +33,18 @@
  *   - `side`: exactly `'left'` or `'right'`;
  *   - `focus`: three booleans (`dimThink` / `dimTools` / `collapseThink`)
  *     defaulting to `true` / `false` / `false`, plus the dim `opacity`
- *     snapped to the 0.1 step and clamped to [0.2, 0.8].
+ *     snapped to the 0.1 step and clamped to [0.2, 0.8];
+ *   - `ballMode`: exactly `'fixed'`, otherwise `'draggable'` (including a
+ *     legacy blob stored without the field);
+ *   - `ball`: a finite `{x, y}` pair, otherwise `null` — viewport clamping
+ *     happens at render time (`clampBallPosition`), never in storage.
  *
  * The whitelist lives HERE (not in MilestoneRail) so the pure functions stay
  * dependency-free and unit-testable; MilestoneRail's feature registry keys
  * itself against the same `ToolbarPinId` type, so id drift is a compile error.
  */
 import { isHexColor } from './accent-utils'
+import { sanitizeBallPosition, type BallPosition } from './ball-position'
 
 /** The single localStorage key holding the toolbar preference blob. */
 export const TOOLBAR_PREFS_KEY = 'dsh-milestone.toolbar'
@@ -64,6 +74,9 @@ export type RailSide = 'left' | 'right'
 
 /** Rail copy language: 'system' follows the harness UI language; 'zh'/'en' force the plugin's own dictionaries. */
 export type RailLocalePref = 'system' | 'zh' | 'en'
+
+/** Floating-ball behavior: 'draggable' lets the user move it; 'fixed' pins it to the resting spot. */
+export type BallMode = 'fixed' | 'draggable'
 
 /**
  * 0.6.3 focus-mode mix (聚焦搭配): which content classes the focus master
@@ -97,6 +110,10 @@ export interface ToolbarPrefs {
   readonly locale: RailLocalePref
   /** 0.6.3 focus-mode mix (dim/collapse which content, at what strength). */
   readonly focus: FocusPrefs
+  /** Floating-ball behavior: 'draggable' lets the user move it; 'fixed' pins it to the resting spot. */
+  readonly ballMode: BallMode
+  /** Persisted floating-ball position; null = use the computed default resting spot. */
+  readonly ball: BallPosition | null
 }
 
 /** The default accent (the classic milestone blue). */
@@ -132,6 +149,8 @@ export const DEFAULT_PREFS: ToolbarPrefs = {
   side: 'right',
   locale: 'system',
   focus: { ...DEFAULT_FOCUS_PREFS },
+  ballMode: 'draggable',
+  ball: null,
 }
 
 /** Type guard for registry ids — unknown strings never survive a parse. */
@@ -216,7 +235,8 @@ export function parsePrefs(raw: string | null): ToolbarPrefs {
     return { ...DEFAULT_PREFS }
   }
   if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_PREFS }
-  const { pinned, accent, iconSize, inset, side, locale, focus } = parsed as Record<string, unknown>
+  const { pinned, accent, iconSize, inset, side, locale, focus, ballMode, ball } =
+    parsed as Record<string, unknown>
   return {
     pinned: sanitizePinned(pinned),
     accent:
@@ -228,6 +248,8 @@ export function parsePrefs(raw: string | null): ToolbarPrefs {
     side: side === 'left' || side === 'right' ? side : DEFAULT_PREFS.side,
     locale: locale === 'zh' || locale === 'en' || locale === 'system' ? locale : DEFAULT_PREFS.locale,
     focus: sanitizeFocus(focus),
+    ballMode: ballMode === 'fixed' ? 'fixed' : 'draggable',
+    ball: sanitizeBallPosition(ball),
   }
 }
 

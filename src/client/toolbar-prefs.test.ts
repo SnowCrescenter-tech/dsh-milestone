@@ -9,6 +9,8 @@
  *     valid hex accent, stepped+clamped sliders, side enum)
  *   - backward compatibility: an old `{ pinned }`-only blob parses with the
  *     new fields at their defaults
+ *   - the floating-ball prefs (`ballMode` / `ball`) sanitize per-field and
+ *     default to `'draggable'` / `null`, including legacy blobs
  *   - `togglePin` flips membership purely and never admits an unknown id
  *   - `savePrefs`/`loadPrefs` round-trip the FULL blob through localStorage
  */
@@ -264,6 +266,8 @@ describe('toolbar-prefs localStorage round-trip', () => {
       side: 'left',
       locale: 'en',
       focus: { dimThink: true, dimTools: true, collapseThink: true, opacity: 0.6 },
+      ballMode: 'fixed',
+      ball: { x: 24, y: 48 },
     }
     savePrefs(prefs)
     expect(window.localStorage.getItem(KEY)).toBe(JSON.stringify(prefs))
@@ -311,5 +315,55 @@ describe('toolbar-prefs locale pref (language switch)', () => {
     const parsed = parsePrefs(JSON.stringify({ pinned: ['bookmarks', 'focus'] }))
     expect(parsed.pinned).toEqual(['bookmarks', 'focus'])
     expect(parsed.locale).toBe('system')
+  })
+})
+
+describe('toolbar-prefs floating-ball prefs (ballMode / ball)', () => {
+  it('DEFAULT_PREFS ships ballMode "draggable" and no stored ball', () => {
+    expect(DEFAULT_PREFS.ballMode).toBe('draggable')
+    expect(DEFAULT_PREFS.ball).toBeNull()
+  })
+
+  it('round-trips a fixed mode and a stored ball position', () => {
+    const parsed = parsePrefs(JSON.stringify({ ballMode: 'fixed', ball: { x: 12, y: 34 } }))
+    expect(parsed.ballMode).toBe('fixed')
+    expect(parsed.ball).toEqual({ x: 12, y: 34 })
+    // The rest of the blob still degrades per-field to the DEFAULT prefs.
+    expect(parsed.pinned).toEqual([])
+    expect(parsed.accent).toBe(DEFAULT_PREFS.accent)
+  })
+
+  it('an invalid ballMode falls back to "draggable"', () => {
+    expect(parsePrefs(JSON.stringify({ ballMode: 'float' })).ballMode).toBe('draggable')
+    expect(parsePrefs(JSON.stringify({ ballMode: 1 })).ballMode).toBe('draggable')
+    expect(parsePrefs(JSON.stringify({ ballMode: null })).ballMode).toBe('draggable')
+    expect(parsePrefs(null).ballMode).toBe('draggable')
+  })
+
+  it('an invalid or partial ball falls back to null (computed resting spot)', () => {
+    expect(parsePrefs(JSON.stringify({ ball: { x: 12 } })).ball).toBeNull()
+    expect(parsePrefs(JSON.stringify({ ball: { x: 12, y: 'nope' } })).ball).toBeNull()
+    expect(parsePrefs(JSON.stringify({ ball: { x: null, y: 34 } })).ball).toBeNull()
+    expect(parsePrefs(JSON.stringify({ ball: [12, 34] })).ball).toBeNull()
+    expect(parsePrefs(JSON.stringify({ ball: '12,34' })).ball).toBeNull()
+    expect(parsePrefs(JSON.stringify({ ball: null })).ball).toBeNull()
+  })
+
+  it('a legacy {pinned}-only blob gains the new defaults', () => {
+    const parsed = parsePrefs(JSON.stringify({ pinned: [] }))
+    expect(parsed.ballMode).toBe('draggable')
+    expect(parsed.ball).toBeNull()
+    expect(parsed.pinned).toEqual([])
+  })
+
+  it('savePrefs persists the sanitized ball fields and loadPrefs reads them back', () => {
+    savePrefs({ ...DEFAULT_PREFS, ballMode: 'fixed', ball: { x: 24, y: 48 } })
+    expect(loadPrefs().ballMode).toBe('fixed')
+    expect(loadPrefs().ball).toEqual({ x: 24, y: 48 })
+  })
+
+  it('a corrupt stored ball sanitizes to null without disturbing the rest', () => {
+    window.localStorage.setItem(KEY, JSON.stringify({ ...DEFAULT_PREFS, ball: 'floating' }))
+    expect(loadPrefs()).toEqual(DEFAULT_PREFS)
   })
 })
