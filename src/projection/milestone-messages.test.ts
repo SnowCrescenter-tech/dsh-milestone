@@ -44,14 +44,62 @@ describe('milestone.messages projection', () => {
     expect(state.turns[0]).toMatchObject({ turn: 2, endTime: 9000, endReason: 'completed' })
   })
 
-  it('records TTFT from the first assistant chunk', () => {
-    const state = fold([
+  it("records TTFT from the settlement stream's first token", () => {
+    // Packed delta runs are what the accumulator persists: the first member's
+    // reconstructed time (time0) is the TTFT anchor.
+    const packed = fold([
       event('turn/start', 0, 1000, { turn: 3 }),
       event('user/message', 1, 1001, { content: [{ type: 'text', text: 'q' }] }),
-      event('assistant/chunk', 2, 2500, { turn: 3, step: 0, chunk: { type: 'text', text: 'a' } }),
-      event('assistant/chunk', 3, 2600, { turn: 3, step: 0, chunk: { type: 'text', text: 'b' } }),
+      event('assistant/message', 2, 3000, {
+        turn: 3,
+        step: 0,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ab' }] },
+        stream: [{ type: 'text-chunks', time0: 2500, index: 0, dt: [100], texts: ['a', 'b'] }],
+      }),
     ])
-    expect(state.turns[0].firstChunkTime).toBe(2500)
+    expect(packed.turns[0].firstChunkTime).toBe(2500)
+
+    // A non-token chunk (block start) must NOT count as the first token.
+    const raw = fold([
+      event('turn/start', 0, 1000, { turn: 3 }),
+      event('user/message', 1, 1001, { content: [{ type: 'text', text: 'q' }] }),
+      event('assistant/message', 2, 3000, {
+        turn: 3,
+        step: 0,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+        stream: [
+          { type: 'chunk', time: 2400, chunk: { type: 'block-start', index: 0, blockType: 'text' } },
+          { type: 'chunk', time: 2500, chunk: { type: 'text-delta', index: 0, text: 'a' } },
+        ],
+      }),
+    ])
+    expect(raw.turns[0].firstChunkTime).toBe(2500)
+  })
+
+  it('records TTFT from a message-less attempt settlement', () => {
+    const state = fold([
+      event('turn/start', 0, 1000, { turn: 5 }),
+      event('user/message', 1, 1001, { content: [{ type: 'text', text: 'q' }] }),
+      event('assistant/attempt', 2, 3000, {
+        turn: 5,
+        step: 0,
+        stream: [{ type: 'text-chunks', time0: 2100, index: 0, dt: [], texts: ['x'] }],
+      }),
+    ])
+    expect(state.turns[0].firstChunkTime).toBe(2100)
+  })
+
+  it('degrades a pre-0.1.5 settlement without a stream instead of throwing', () => {
+    const state = fold([
+      event('turn/start', 0, 1000, { turn: 6 }),
+      event('user/message', 1, 1001, { content: [{ type: 'text', text: 'q' }] }),
+      event('assistant/message', 2, 3000, {
+        turn: 6,
+        step: 0,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+      }),
+    ])
+    expect(state.turns[0].firstChunkTime).toBeUndefined()
   })
 
   it('accumulates usage across steps and messages', () => {
@@ -61,15 +109,38 @@ describe('milestone.messages projection', () => {
       event('assistant/message', 2, 3000, {
         turn: 4, step: 0,
         message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
-        usage: { input: 10, output: 20, total: 30 },
+        stream: [],
+        usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
       }),
       event('assistant/message', 5, 4000, {
         turn: 4, step: 1,
         message: { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
-        usage: { input: 5, output: 7, total: 12 },
+        stream: [],
+        usage: { inputTokens: 5, outputTokens: 7, totalTokens: 12 },
       }),
     ])
     expect(state.turns[0].usage).toEqual({ input: 15, output: 27, total: 42 })
+  })
+
+  it('folds cached input into the billed input and falls back when total is absent', () => {
+    const state = fold([
+      event('turn/start', 0, 1000, { turn: 7 }),
+      event('user/message', 1, 1001, { content: [{ type: 'text', text: 'q' }] }),
+      event('assistant/message', 2, 3000, {
+        turn: 7, step: 0,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+        stream: [],
+        // Un-renamed (pre-0.1.5) fields must degrade to zero, not NaN.
+        usage: { input: 9, output: 9, total: 9 },
+      }),
+      event('assistant/message', 5, 4000, {
+        turn: 7, step: 1,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'b' }] },
+        stream: [],
+        usage: { inputTokens: 100, outputTokens: 40, cacheReadTokens: 1000, cacheWriteTokens: 3 },
+      }),
+    ])
+    expect(state.turns[0].usage).toEqual({ input: 1103, output: 40, total: 1143 })
   })
 
   it('keeps reference stability for no-op applies', () => {

@@ -11,12 +11,21 @@
  * window (this also removes the plugin's long-standing "rail only covers the
  * loaded window" limitation).
  *
- * Fold inputs:
+ * Fold inputs (0.1.5 vocabulary):
  *   - `turn/start`  -> opens turn meta (start seq/time)
  *   - `user/message`-> appends one message entry (seq/time/turn/preview/full text)
- *   - `assistant/chunk` -> records the turn's first-chunk time (TTFT)
- *   - `assistant/message` -> accumulates the turn's token usage
+ *   - `assistant/message` -> accumulates the turn's token usage and records its
+ *     TTFT from the settlement's embedded compact stream
+ *   - `assistant/attempt` -> records TTFT for an attempt that settled without a
+ *     surface message (failed / retried / cancelled / stream error)
  *   - `turn/end`    -> closes turn meta (end time, end reason)
+ *
+ * 0.1.5 migration: the standalone `assistant/chunk` event no longer exists —
+ * streaming timing now travels inside the settlement events as a compact
+ * `stream: AssistantStreamRecord[]`, and the vendor reader
+ * `assistantStreamFirstTokenTime` answers TTFT from it without expanding the
+ * stream. `stateVersion` was bumped so 0.1.2-era persisted checkpoints are
+ * discarded instead of forward-applied.
  *
  * State is plain JSON (persisted-cache precondition) and updates are
  * reference-stable: an apply that changes nothing returns the same state.
@@ -29,6 +38,7 @@ import {
   type SessionLogOffset,
   type TurnEndReason,
 } from '@deepseek-ai/dsh-session'
+import { assistantStreamFirstTokenTime } from '@deepseek-ai/dsh-llm'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 
 /** Preview budget: one tooltip line (matches the rail's 80-char previews). */
@@ -57,9 +67,14 @@ export interface MilestoneTurnMeta {
   readonly endTime?: number
   /** `turn/end` reason; absent while open. */
   readonly endReason?: string
-  /** First `assistant/chunk` arrival (ms) — TTFT anchor. */
+  /** Time of the attempt stream's first token (ms) — TTFT anchor. */
   readonly firstChunkTime?: number
-  /** Accumulated `assistant/message` usage across steps. */
+  /**
+   * Accumulated `assistant/message` usage across steps. `input` is the FULL
+   * billed input (uncached + cache read + cache write), preserving the
+   * pre-0.1.5 "prompt tokens" meaning; `total` prefers the provider total and
+   * falls back to `input + output`.
+   */
   readonly usage?: { readonly input: number; readonly output: number; readonly total: number }
 }
 
@@ -133,6 +148,16 @@ export function fullText(content: readonly unknown[]): string {
   return parts.join('\n')
 }
 
+/**
+ * Finite-number read with a zero fallback. Usage payloads read at this fold
+ * boundary may predate the 0.1.5 `TokenUsage` rename (a migrated pre-0.1.5 log
+ * carries `input`/`output`/`total` instead), so a missing field must degrade to
+ * zero rather than poison the accumulated totals with `NaN`.
+ */
+function finiteOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
 /** Immutable fold state helper: open-turn bookkeeping lives in the state array tail. */
 const EMPTY_MESSAGES: readonly MilestoneMessageEntry[] = Object.freeze([])
 const EMPTY_TURNS: readonly MilestoneTurnMeta[] = Object.freeze([])
@@ -143,7 +168,8 @@ function initialState(): MilestoneMessagesState {
 
 export const milestoneMessagesProjectionDefinition = {
   key: 'milestone.messages',
-  stateVersion: 1,
+  // 2: 0.1.5 fold semantics (embedded stream TTFT; TokenUsage field rename).
+  stateVersion: 2,
   stateSchema: z.custom<MilestoneMessagesState>(),
   init: (_header: SessionHeader, _inheritedEventCount: SessionLogOffset): MilestoneMessagesState => initialState(),
   apply(state: MilestoneMessagesState, event: SessionEvent): MilestoneMessagesState {
@@ -175,30 +201,54 @@ export const milestoneMessagesProjectionDefinition = {
           turns: state.turns,
         }
       }
-      case 'assistant/chunk': {
-        const turn = event.data.turn
-        const index = state.turns.findIndex((t) => t.turn === turn)
-        if (index < 0 || state.turns[index].firstChunkTime !== undefined) return state
-        const turns = state.turns.slice()
-        turns[index] = { ...turns[index], firstChunkTime: event.time }
-        return { messages: state.messages, turns }
-      }
       case 'assistant/message': {
         const turn = event.data.turn
         const index = state.turns.findIndex((t) => t.turn === turn)
         if (index < 0) return state
-        const usage = (event.data as { usage?: { input?: number; output?: number; total?: number } }).usage
-        if (!usage) return state
-        const prior = state.turns[index].usage ?? { input: 0, output: 0, total: 0 }
-        const turns = state.turns.slice()
-        turns[index] = {
-          ...turns[index],
-          usage: {
-            input: prior.input + (usage.input ?? 0),
-            output: prior.output + (usage.output ?? 0),
-            total: prior.total + (usage.total ?? 0),
-          },
+        const prior = state.turns[index]
+        let next = prior
+        // 0.1.5: streaming timing travels in the settlement's embedded stream.
+        // Guarded: a migrated pre-0.1.5 log carries no `stream` field.
+        const stream = event.data.stream
+        const firstToken = Array.isArray(stream) ? assistantStreamFirstTokenTime(stream) : undefined
+        if (firstToken !== undefined && prior.firstChunkTime === undefined) {
+          next = { ...next, firstChunkTime: firstToken }
         }
+        const usage = event.data.usage
+        if (usage !== undefined) {
+          const accumulated = next.usage ?? { input: 0, output: 0, total: 0 }
+          // 0.1.5 TokenUsage is disjoint (cached input is reported separately);
+          // summing the three restores the pre-0.1.5 "prompt tokens" meaning.
+          const input =
+            finiteOrZero(usage.inputTokens) +
+            finiteOrZero(usage.cacheReadTokens) +
+            finiteOrZero(usage.cacheWriteTokens)
+          const output = finiteOrZero(usage.outputTokens)
+          const total =
+            usage.totalTokens === undefined ? input + output : finiteOrZero(usage.totalTokens)
+          next = {
+            ...next,
+            usage: {
+              input: accumulated.input + input,
+              output: accumulated.output + output,
+              total: accumulated.total + total,
+            },
+          }
+        }
+        if (next === prior) return state
+        const turns = state.turns.slice()
+        turns[index] = next
+        return { messages: state.messages, turns }
+      }
+      case 'assistant/attempt': {
+        const turn = event.data.turn
+        const index = state.turns.findIndex((t) => t.turn === turn)
+        if (index < 0 || state.turns[index].firstChunkTime !== undefined) return state
+        const stream = event.data.stream
+        const firstToken = Array.isArray(stream) ? assistantStreamFirstTokenTime(stream) : undefined
+        if (firstToken === undefined) return state
+        const turns = state.turns.slice()
+        turns[index] = { ...turns[index], firstChunkTime: firstToken }
         return { messages: state.messages, turns }
       }
       case 'turn/end': {
