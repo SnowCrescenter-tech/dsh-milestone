@@ -114,9 +114,11 @@ shell.overlay (root scope)
 
 ## 版本与兼容
 
-- 当前官方支持线：**`0.1.2-rc.1`**（与 `@deepseek-ai/dsh` 最新 `latest` 标签一致）。
-- peer/dev 范围为收紧的 `>=0.1.2-rc.1 <0.3.0-0`（`dsh-client-locale` / `dsh-client-store` / `dsh-client-ui-slots`）：依赖解析到旧线时会得到明确的 ERESOLVE，而不是静默错配。
-- 0.1.2 起会话数据改经**会话投影**提供（插件注册 `milestone.messages`，client 端 `useProjection` 读取）；`dsh-client-runtime` 不再是依赖——`defineStore` 现由 `@deepseek-ai/dsh-client-store` 提供。
+- 当前官方支持线：**`0.1.5-rc.1`**（与 `@deepseek-ai/dsh` 最新 `latest` / `next` 标签一致）。
+- peer/dev 范围为收紧的 `>=0.1.5-rc.1 <0.3.0-0`（`dsh-client-locale` / `dsh-client-store` / `dsh-client-ui-slots`）：依赖解析到旧线时会得到明确的 ERESOLVE，而不是静默错配。
+- 0.1.5 起流式时序内嵌在 `assistant/message` / `assistant/attempt` 的紧凑 `stream` 中（独立的 `assistant/chunk` 事件已移除），TTFT 由官方 `assistantStreamFirstTokenTime` 读取；`TokenUsage` 字段更名为 `inputTokens`/`outputTokens`/`totalTokens` 并拆分缓存计数，插件的 `input` 显示为三项之和（缓存计入），保持旧的「提示词 token」含义。
+- 会话数据自 0.1.2 起改经**会话投影**提供（插件注册 `milestone.messages`，client 端 `useProjection` 读取）；`defineStore` 由 `@deepseek-ai/dsh-client-store` 提供。
+- 已知上游打包缺陷：`@deepseek-ai/dsh-client-store@0.1.5-rc.1` 的 `lib/index.js` 运行时引用 `zustand`/`immer`，清单却把它们放在 `devDependencies` 未声明为依赖——导入该模块即报 `Cannot find package 'zustand'`。本仓库用 pnpm `packageExtensions` 兜底补全（见 `pnpm-workspace.yaml`）。
 - harness 当前版本在浏览器端没有可信来源（`host.describe().version` 是占位值），因此不做精确探测，以插件声明的支持线为准。
 
 ## 已知限制
@@ -140,9 +142,9 @@ shell.overlay (root scope)
 <details>
 <summary>v0.7.0 / v0.6.6 / v0.6.5 / v0.6.4（点击展开）</summary>
 
-**v0.7.0** · 跟随官方 0.1.2（会话投影数据层）· 折叠为可拖动悬浮球（issue #4）· 444 项测试
+**v0.7.0** · 跟随官方 0.1.5（会话投影数据层）· 折叠为可拖动悬浮球（issue #4）· 447 项测试
 
-- **跟随官方 0.1.2**：会话数据改由插件自注册的 `milestone.messages` 投影提供——host 端对完整事件日志 fold，client 端 `useProjection` 读取；圆点列表与站内搜索覆盖**整个会话**，与 DOM 加载窗口解耦。`defineStore` 改由 `@deepseek-ai/dsh-client-store` 提供，peer 收紧到 `0.1.2-rc.1` 线，移除 `dsh-client-runtime` 依赖。
+- **跟随官方 0.1.5**：会话数据由插件自注册的 `milestone.messages` 投影提供——host 端对完整事件日志 fold，client 端 `useProjection` 读取；圆点列表与站内搜索覆盖**整个会话**，与 DOM 加载窗口解耦。TTFT 改从结算事件内嵌的紧凑 `stream` 读取（独立的 `assistant/chunk` 已移除），`TokenUsage` 字段更名并计入缓存；peer 收紧到 `0.1.5-rc.1` 线，移除 `dsh-client-runtime` 依赖（含 `dsh.client.inject`）。
 - **折叠为悬浮球（issue #4）**：里程碑条可一键收成半透明悬浮球，自由拖到屏幕任意位置；点击展开、拖动移动（拖动与点击互斥），位置按 localStorage 记忆；设置里可选「固定 / 可拖动」并一键重置位置。
 
 > [GitHub Release v0.7.0](https://github.com/SnowCrescenter-tech/dsh-milestone/releases/tag/v0.7.0)
