@@ -42,6 +42,10 @@ export const zh = {
   'rail.label': '会话里程碑',
   /** aria-label on the dot list. */
   'rail.list': '会话里程碑列表',
+  /** aria-label on the rail-collapse control (issue #4: fold the rail into the floating ball). */
+  'rail.collapse': '收起为悬浮球',
+  /** aria-label + title on the collapsed rail's floating ball (click = expand). */
+  'ball.expand': '展开里程碑条',
   /** Hover preview fallback for empty message text. */
   'no.text': '（无文本）',
   /** Relative time: `< 60s`. */
@@ -132,6 +136,8 @@ export const zh = {
   'settings.section.personal': '个性化',
   /** Settings modal: section heading for the focus-mode controls (0.6.3). */
   'settings.section.focus': '聚焦',
+  /** Settings modal: section heading for the floating-ball controls (issue #4). */
+  'settings.section.ball': '悬浮球',
   /** Settings: personalization-section hint shown inside the expanded block. */
   'settings.personal.hint': '圆点、强调色与位置，即调即存',
   /** Settings: aria-label on the personalization block toggle while COLLAPSED. */
@@ -168,6 +174,16 @@ export const zh = {
   'settings.side.left': '左侧',
   /** Settings personalization: side radio — hug the right edge. */
   'settings.side.right': '右侧',
+  /** Settings: floating-ball block — hint shown inside the expanded block. */
+  'settings.ball.hint': '收起后变为悬浮球；可固定，也可自由拖动到任意位置',
+  /** Settings: floating-ball behavior row label + radiogroup aria-label. */
+  'settings.ball.mode': '行为',
+  /** Settings: floating-ball behavior radio — pinned to the resting spot. */
+  'settings.ball.mode.fixed': '固定',
+  /** Settings: floating-ball behavior radio — free drag anywhere. */
+  'settings.ball.mode.draggable': '可拖动',
+  /** Settings: floating-ball action — drop the persisted drag position. */
+  'settings.ball.reset': '重置位置',
   /** Settings: focus block — hint shown inside the expanded block. */
   'settings.focus.hint': '这些选项自由组合成你的「聚焦搭配」；总开关仍是工具栏的眼睛按钮',
   /** Settings: aria-label on the focus block toggle while COLLAPSED. */
@@ -277,6 +293,8 @@ export const en: Record<MilestoneKey, string> = {
   'load.older': 'Load older messages',
   'rail.label': 'Session milestones',
   'rail.list': 'Session milestone list',
+  'rail.collapse': 'Collapse to floating ball',
+  'ball.expand': 'Expand milestone rail',
   'no.text': '(no text)',
   'time.justNow': 'Just now',
   'time.minutes': '{n} minutes ago',
@@ -323,6 +341,7 @@ export const en: Record<MilestoneKey, string> = {
   'settings.section.features': 'Features & Shortcuts',
   'settings.section.personal': 'Personalization',
   'settings.section.focus': 'Focus',
+  'settings.section.ball': 'Floating ball',
   'settings.personal.hint': 'Dot size, accent color, and position — saved as you adjust',
   'settings.personal.expand': 'Expand personalization',
   'settings.personal.collapse': 'Collapse personalization',
@@ -341,6 +360,11 @@ export const en: Record<MilestoneKey, string> = {
   'settings.side': 'Position',
   'settings.side.left': 'Left',
   'settings.side.right': 'Right',
+  'settings.ball.hint': 'Collapses into a floating ball — pin it, or drag it anywhere',
+  'settings.ball.mode': 'Behavior',
+  'settings.ball.mode.fixed': 'Fixed',
+  'settings.ball.mode.draggable': 'Draggable',
+  'settings.ball.reset': 'Reset position',
   'settings.focus.hint': 'Combine these options into your own focus recipe; the eye button on the toolbar stays the master switch',
   'settings.focus.expand': 'Expand focus settings',
   'settings.focus.collapse': 'Collapse focus settings',

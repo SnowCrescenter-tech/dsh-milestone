@@ -41,10 +41,12 @@
  * grid); everything the modal changes persists under `dsh-milestone.toolbar`.
  */
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { CSSProperties, FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
+import type { CSSProperties, FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import { badgePulseCss, badgeRingStyle, deriveBadge } from './badge-logic'
 import type { BadgeKind } from './badge-logic'
+import { BALL_SIZE, clampBallPosition, defaultBallPosition, isDragGesture } from './ball-position'
+import type { BallPosition } from './ball-position'
 import type { createBookmarksStore } from './bookmarkStore.ts'
 import { filterByBookmarks, isBookmarked } from './bookmark-logic'
 import { copyText } from './clipboard-logic'
@@ -67,7 +69,7 @@ import { readOnboardedFlag } from './onboarding-store'
 import { useCurrentAnchor } from './useCurrentAnchor.ts'
 import { outsideDismissMatches, useOutsideDismiss } from './useOutsideDismiss.ts'
 import { DEFAULT_PREFS, loadPrefs, savePrefs, togglePin } from './toolbar-prefs.ts'
-import type { FocusPrefs, RailSide, ToolbarPinId, ToolbarPrefs } from './toolbar-prefs.ts'
+import type { BallMode, FocusPrefs, RailSide, ToolbarPinId, ToolbarPrefs } from './toolbar-prefs.ts'
 import { lighten, rgbaString } from './accent-utils'
 import { loadCachedLatest, needsUpdate, SUPPORTED_HOST_LINES } from './version-logic.ts'
 import { PLUGIN_NPM_URL, PLUGIN_REPO_URL, PLUGIN_VERSION } from './version-meta.ts'
@@ -251,24 +253,24 @@ const MODAL_CSS = `
 /* Row and header washes (the inline styles deliberately leave backgrounds
    unset so these rules win over the default padding-box background). */
 [data-toolbar-pin-toggle]:hover, [data-toolbar-pin-toggle]:focus-visible { background: rgba(255, 255, 255, 0.06); }
-[data-personal-toggle]:hover, [data-focus-toggle-settings]:hover { background: rgba(255, 255, 255, 0.05); }
+[data-personal-toggle]:hover, [data-focus-toggle-settings]:hover, [data-ball-toggle]:hover { background: rgba(255, 255, 255, 0.05); }
 [data-focus-option]:hover { background: rgba(255, 255, 255, 0.04); }
 [data-toolbar-settings-close]:hover { background: rgba(255, 255, 255, 0.08); }
-[data-toolbar-settings-reset], [data-onboarding-reopen] { background: rgba(255, 255, 255, 0.06); }
-[data-toolbar-settings-reset]:hover, [data-onboarding-reopen]:hover { background: rgba(255, 255, 255, 0.1); }
+[data-toolbar-settings-reset], [data-onboarding-reopen], [data-ball-reset] { background: rgba(255, 255, 255, 0.06); }
+[data-toolbar-settings-reset]:hover, [data-onboarding-reopen]:hover, [data-ball-reset]:hover { background: rgba(255, 255, 255, 0.1); }
 /* BASE state reset: every modal surface must sit transparent on the dark
    panel — without it the UA default button face (light gray) floods through
    and rows become unreadable light-on-light. Hover washes above take over
    on interaction. */
-[data-toolbar-pin-toggle], [data-personal-toggle], [data-focus-toggle-settings],
+[data-toolbar-pin-toggle], [data-personal-toggle], [data-focus-toggle-settings], [data-ball-toggle],
 [data-toolbar-settings-close], [data-focus-option] {
   background: transparent;
 }
 /* ONE accent ring for keyboard focus on every modal control. */
 [data-toolbar-pin-toggle]:focus-visible, [data-personal-toggle]:focus-visible,
-[data-focus-toggle-settings]:focus-visible,
+[data-focus-toggle-settings]:focus-visible, [data-ball-toggle]:focus-visible,
 [data-toolbar-settings-close]:focus-visible, [data-toolbar-settings-reset]:focus-visible,
-[data-onboarding-reopen]:focus-visible {
+[data-onboarding-reopen]:focus-visible, [data-ball-reset]:focus-visible {
   box-shadow: 0 0 0 2px var(--ms-accent-soft);
 }
 /* Near-row description tip: a rotated square peeks out of the LEFT edge so
@@ -282,10 +284,10 @@ const MODAL_CSS = `
 }
 /* Tip + chevron motion lives here (not inline) so reduced-motion can kill it. */
 [data-settings-tip] { transition: opacity 140ms ease, transform 140ms ease, visibility 140ms; }
-[data-personal-toggle] svg, [data-focus-toggle-settings] svg { transition: transform 150ms ease; }
-/* One authored reveal: the personalization/focus bodies fade in on expand. */
+[data-personal-toggle] svg, [data-focus-toggle-settings] svg, [data-ball-toggle] svg { transition: transform 150ms ease; }
+/* One authored reveal: the personalization/focus/ball bodies fade in on expand. */
 @keyframes ms-settings-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
-[data-settings-personal-body], [data-settings-focus-body] { animation: ms-settings-fade 140ms ease; }
+[data-settings-personal-body], [data-settings-focus-body], [data-settings-ball-body] { animation: ms-settings-fade 140ms ease; }
 /* Thin themed scrollbar for the scrollable modal panel. */
 [data-toolbar-settings-panel]::-webkit-scrollbar { width: 10px; }
 [data-toolbar-settings-panel]::-webkit-scrollbar-thumb {
@@ -293,8 +295,8 @@ const MODAL_CSS = `
 }
 [data-toolbar-settings-panel]::-webkit-scrollbar-track { background: transparent; }
 @media (prefers-reduced-motion: reduce) {
-  [data-settings-tip], [data-personal-toggle] svg, [data-focus-toggle-settings] svg, [data-support-card] { transition: none; }
-  [data-settings-personal-body], [data-settings-focus-body] { animation: none; }
+  [data-settings-tip], [data-personal-toggle] svg, [data-focus-toggle-settings] svg, [data-ball-toggle] svg, [data-support-card] { transition: none; }
+  [data-settings-personal-body], [data-settings-focus-body], [data-settings-ball-body] { animation: none; }
 }
 [data-search-toggle] { color: #8b96ab !important; }
 [data-search-toggle][aria-pressed="true"] { background: var(--ms-accent-bg) !important; color: var(--ms-accent-soft) !important; }
@@ -366,6 +368,20 @@ interface SearchState {
   /** Position within the CURRENT match list (not a mark index). */
   readonly activePos: number
   readonly panelOpen: boolean
+}
+
+/**
+ * Issue #4: one in-flight press on the floating ball — the pointer origin, the
+ * ball's rendered position at press time (drag math is a pure delta off this
+ * anchor), and whether the pointer travelled past the drag threshold. A press
+ * that never crosses the threshold is a CLICK (expand the rail); one that does
+ * is a DRAG (move + persist the ball).
+ */
+interface BallDragState {
+  readonly pointerId: number
+  readonly startPointer: BallPosition
+  readonly startPos: BallPosition
+  moved: boolean
 }
 
 /**
@@ -697,7 +713,7 @@ export function MilestoneRail({
   // render state and the persisted blob never diverge. Backward compatible:
   // an old `{pinned}`-only blob parses with the new fields at their defaults.
   const [prefs, setPrefs] = useState<ToolbarPrefs>(() => loadPrefs())
-  const { pinned, accent, iconSize, inset, side } = prefs
+  const { pinned, accent, iconSize, inset, side, ballMode, ball } = prefs
   // Derived metrics: the icon-size slider IS the hit area (20-36px); the dot
   // diameter and pitch scale proportionally from the classic 28/14/14 values.
   const scale = iconSize / DOT_HIT
@@ -795,6 +811,44 @@ export function MilestoneRail({
   /** B-design (0.6.3): the focus block mirrors the personalization block —
    * collapsed by default, the header leads with a live option summary. */
   const [focusOpen, setFocusOpen] = useState(false)
+  // Issue #4: the rail folds into a floating ball. `railCollapsed` is
+  // EPHEMERAL (a per-mount state, never persisted — a reload always starts
+  // expanded); the ball's behavior mode and last position live in the
+  // persisted prefs instead.
+  const [railCollapsed, setRailCollapsed] = useState(false)
+  const [railCollapseHovered, setRailCollapseHovered] = useState(false)
+  /** Issue #4 settings: the floating-ball block mirrors the personalization /
+   * focus collapsibles — collapsed by default, the header leads with the mode. */
+  const [ballOpen, setBallOpen] = useState(false)
+  /** The live ball position while a press is in flight (`null` = resting). */
+  const [dragPos, setDragPos] = useState<BallPosition | null>(null)
+  const dragRef = useRef<BallDragState | null>(null)
+  /** Detaches the in-flight press's window listeners (set on pointerdown). */
+  const dragListenersRef = useRef<(() => void) | null>(null)
+
+  // Issue #4: never leak an in-flight press's window listeners when the rail
+  // unmounts mid-gesture (the pointerup/pointercancel paths detach them in the
+  // normal flow).
+  useEffect(
+    () => () => {
+      dragListenersRef.current?.()
+      dragListenersRef.current = null
+    },
+    [],
+  )
+
+  // Issue #4 resize safety: while the ball is on screen, a window resize must
+  // re-clamp it against the LIVE viewport. The ball's resting spot is derived
+  // from `window.innerWidth/innerHeight` on every render, so one re-render on
+  // resize keeps it fully on-screen even when the window shrinks.
+  const [, setBallTick] = useState(0)
+  useEffect(() => {
+    if (!railCollapsed) return
+    const onResize = (): void => setBallTick((n) => n + 1)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [railCollapsed])
+
   const settingsRef = useRef<HTMLDivElement>(null)
   const settingsBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -1556,6 +1610,177 @@ export function MilestoneRail({
   // affordance's precondition reads as one named fact).
   const showLoadOlder = hasMore && marks.length >= MIN_MARKS
 
+  // Issue #4: the collapsed rail renders ONLY the floating ball — no rail, no
+  // dots, no toolbar. Click expands; drag (ballMode 'draggable') moves it and
+  // persists the clamped position. `railCollapsed` is ephemeral (never
+  // persisted), so a reload always starts expanded.
+  if (railCollapsed) {
+    const viewport = { width: window.innerWidth, height: window.innerHeight }
+    const resting = clampBallPosition(
+      ball ?? defaultBallPosition(viewport, side, inset),
+      viewport,
+    )
+    const pos = dragPos ?? resting
+
+    /** Detach the in-flight press's window listeners (idempotent). */
+    const removeDragListeners = (): void => {
+      const detach = dragListenersRef.current
+      if (detach === null) return
+      dragListenersRef.current = null
+      detach()
+    }
+
+    /** Release the pointer capture when the DOM implementation supports it. */
+    const releaseBallCapture = (el: HTMLDivElement, pointerId: number): void => {
+      if (typeof el.releasePointerCapture !== 'function') return
+      try {
+        el.releasePointerCapture(pointerId)
+      } catch {
+        // Not captured (or jsdom): capture is an enhancement, never a need.
+      }
+    }
+
+    /**
+     * Press start: in draggable mode record the gesture anchor and arm the
+     * window pointer listeners; in fixed mode do nothing drag-related — the
+     * plain onClick fallback below still expands the rail.
+     */
+    const onBallPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
+      if (ballMode !== 'draggable') return
+      const el = e.currentTarget
+      if (typeof el.setPointerCapture === 'function') {
+        try {
+          el.setPointerCapture(e.pointerId)
+        } catch {
+          // jsdom / a stale pointerId: capture is an enhancement, not a need.
+        }
+      }
+      // A second press without an intervening release supersedes the first.
+      if (dragRef.current !== null) removeDragListeners()
+      dragRef.current = {
+        pointerId: e.pointerId,
+        startPointer: { x: e.clientX, y: e.clientY },
+        startPos: pos,
+        moved: false,
+      }
+
+      const onMove = (ev: PointerEvent): void => {
+        const drag = dragRef.current
+        if (drag === null) return
+        const live = { width: window.innerWidth, height: window.innerHeight }
+        setDragPos(
+          clampBallPosition(
+            {
+              x: drag.startPos.x + (ev.clientX - drag.startPointer.x),
+              y: drag.startPos.y + (ev.clientY - drag.startPointer.y),
+            },
+            live,
+          ),
+        )
+        drag.moved = drag.moved || isDragGesture(drag.startPointer, { x: ev.clientX, y: ev.clientY })
+      }
+
+      const onUp = (ev: PointerEvent): void => {
+        const drag = dragRef.current
+        if (drag === null) return
+        removeDragListeners()
+        releaseBallCapture(el, drag.pointerId)
+        if (drag.moved) {
+          // A real drag persists the final clamped spot and NEVER expands.
+          const live = { width: window.innerWidth, height: window.innerHeight }
+          updatePrefs({
+            ball: clampBallPosition(
+              {
+                x: drag.startPos.x + (ev.clientX - drag.startPointer.x),
+                y: drag.startPos.y + (ev.clientY - drag.startPointer.y),
+              },
+              live,
+            ),
+          })
+        } else {
+          // A press that never travelled is the click-to-expand gesture.
+          setRailCollapsed(false)
+        }
+        setDragPos(null)
+        dragRef.current = null
+      }
+
+      const onCancel = (): void => {
+        const drag = dragRef.current
+        if (drag === null) return
+        removeDragListeners()
+        releaseBallCapture(el, drag.pointerId)
+        setDragPos(null)
+        dragRef.current = null
+      }
+
+      window.addEventListener('pointermove', onMove)
+      window.addEventListener('pointerup', onUp)
+      window.addEventListener('pointercancel', onCancel)
+      dragListenersRef.current = () => {
+        window.removeEventListener('pointermove', onMove)
+        window.removeEventListener('pointerup', onUp)
+        window.removeEventListener('pointercancel', onCancel)
+      }
+    }
+
+    return (
+      <div
+        data-milestone-ball
+        role="button"
+        tabIndex={0}
+        aria-label={t('ball.expand')}
+        title={t('ball.expand')}
+        data-ball-x={String(Math.round(pos.x))}
+        data-ball-y={String(Math.round(pos.y))}
+        onPointerDown={onBallPointerDown}
+        // Fixed mode arms no drag listeners, so the plain click still expands;
+        // draggable mode expands from the shared pointerup path instead (a
+        // click handler here would double-fire after a real drag).
+        onClick={ballMode === 'fixed' ? () => setRailCollapsed(false) : undefined}
+        onKeyDown={(e: ReactKeyboardEvent<HTMLDivElement>) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          setRailCollapsed(false)
+        }}
+        style={{
+          position: 'fixed',
+          left: pos.x,
+          top: pos.y,
+          width: BALL_SIZE,
+          height: BALL_SIZE,
+          borderRadius: '50%',
+          background: accent,
+          color: '#ffffff',
+          opacity: 0.9,
+          zIndex: 100,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          touchAction: 'none',
+          userSelect: 'none',
+          cursor: ballMode === 'draggable' ? 'grab' : 'pointer',
+          boxShadow: '0 4px 14px rgba(0, 0, 0, 0.35)',
+        }}
+      >
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
+        </svg>
+      </div>
+    )
+  }
+
   // B-design: rail root carries both the geometry AND the personalization as
   // CSS variables + data attributes (test hooks + downstream CSS consumers).
   const railStyle = {
@@ -1621,6 +1846,36 @@ export function MilestoneRail({
           ···
         </button>
       )}
+
+      {/* Issue #4: fold the whole rail into the floating ball. */}
+      <button
+        type="button"
+        data-rail-collapse
+        aria-label={t('rail.collapse')}
+        title={t('rail.collapse')}
+        onClick={() => setRailCollapsed(true)}
+        onMouseEnter={() => setRailCollapseHovered(true)}
+        onMouseLeave={() => setRailCollapseHovered(false)}
+        onFocus={() => setRailCollapseHovered(true)}
+        onBlur={() => setRailCollapseHovered(false)}
+        style={chromeButtonStyle(railCollapseHovered)}
+      >
+        {/* A ball glyph: the rail folds into the floating circle. */}
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
 
       {/* B1 collapsible toolbar: the function-key area. Collapsed by default —
           only the expand arrow and the user's PINNED features render; the
@@ -2055,6 +2310,113 @@ export function MilestoneRail({
                       />
                       {t('settings.side.right')}
                     </label>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* ②·⅓ 悬浮球（issue #4）— the collapsed rail's floating ball:
+                behavior (fixed vs draggable) + a position reset. Mirrors the
+                personalization collapsible block (collapsed by default, the
+                header leads with the current mode). */}
+            <div data-settings-section data-settings-ball style={{ marginBottom: 20 }}>
+              <button
+                type="button"
+                data-ball-toggle
+                aria-expanded={ballOpen}
+                aria-label={t('settings.section.ball')}
+                title={t('settings.section.ball')}
+                onClick={() => setBallOpen((v) => !v)}
+                style={SECTION_TOGGLE_STYLE}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  style={{
+                    flexShrink: 0,
+                    transform: ballOpen ? 'rotate(90deg)' : 'none',
+                  }}
+                >
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+                <span data-settings-section-title style={{ flexShrink: 0 }}>
+                  {t('settings.section.ball')}
+                </span>
+                <span data-ball-summary style={SECTION_SUMMARY_STYLE}>
+                  {ballMode === 'fixed'
+                    ? t('settings.ball.mode.fixed')
+                    : t('settings.ball.mode.draggable')}
+                </span>
+              </button>
+              {ballOpen && (
+                <div
+                  data-settings-ball-body
+                  style={{ padding: '10px 4px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}
+                >
+                  <div
+                    data-settings-ball-hint
+                    style={{ fontSize: 12, color: MODAL_HINT, lineHeight: 1.5, padding: '0 6px' }}
+                  >
+                    {t('settings.ball.hint')}
+                  </div>
+                  {/* Ball behavior radio group — fixed pins the resting spot,
+                      draggable lets the user move it anywhere. */}
+                  <div
+                    role="radiogroup"
+                    aria-label={t('settings.ball.mode')}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}
+                  >
+                    <span style={{ fontSize: 12.5, color: MODAL_HINT, width: 90, flexShrink: 0 }}>
+                      {t('settings.ball.mode')}
+                    </span>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: MODAL_FG, cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="ms-ball-mode"
+                        data-ball-mode-radio
+                        value="fixed"
+                        checked={ballMode === 'fixed'}
+                        onChange={() => updatePrefs({ ballMode: 'fixed' as BallMode })}
+                      />
+                      {t('settings.ball.mode.fixed')}
+                    </label>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 13, color: MODAL_FG, cursor: 'pointer' }}>
+                      <input
+                        type="radio"
+                        name="ms-ball-mode"
+                        data-ball-mode-radio
+                        value="draggable"
+                        checked={ballMode === 'draggable'}
+                        onChange={() => updatePrefs({ ballMode: 'draggable' as BallMode })}
+                      />
+                      {t('settings.ball.mode.draggable')}
+                    </label>
+                  </div>
+                  {/* Reset the persisted drag position back to the computed
+                      resting spot (storage `ball: null`). */}
+                  <div>
+                    <button
+                      type="button"
+                      data-ball-reset
+                      onClick={() => updatePrefs({ ball: null })}
+                      style={{
+                        padding: '7px 16px',
+                        border: `1px solid ${MODAL_BORDER}`,
+                        borderRadius: MODAL_RADIUS_CONTROL,
+                        cursor: 'pointer',
+                        color: MODAL_TEXT,
+                        fontSize: 12.5,
+                      }}
+                    >
+                      {t('settings.ball.reset')}
+                    </button>
                   </div>
                 </div>
               )}

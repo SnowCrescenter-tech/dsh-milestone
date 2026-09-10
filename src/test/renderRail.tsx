@@ -26,6 +26,7 @@ import { MilestoneRail } from '../client/MilestoneRail.tsx'
 import type { MilestoneRailProps } from '../client/MilestoneRail.tsx'
 import { createBookmarksStore } from '../client/bookmarkStore.ts'
 import { zh } from '../client/locales.ts'
+import { TOOLBAR_PREFS_KEY } from '../client/toolbar-prefs.ts'
 import type { MilestoneMessageEntry, MilestoneMessagesView, MilestoneTurnMeta } from '../projection/milestone-messages'
 import { extractText } from '../client/rail-logic.ts'
 import type { ConversationSnapshotFixture, FixtureTextBlock } from './snapshot-fixture.ts'
@@ -145,6 +146,12 @@ export function renderRail(
     forkAt?: (atSeq: number) => Promise<string>
     searchSessions?: (query: string, signal: AbortSignal) => Promise<{ items: SessionSearchHit[]; hasMore: boolean }>
     openSession?: (id: string) => void
+    /**
+     * Toolbar-prefs seed (`dsh-milestone.toolbar`) written to localStorage
+     * BEFORE the rail mounts, so its `useState(loadPrefs)` initializer
+     * hydrates from it — lets tests seed `ballMode` / `ball`.
+     */
+    prefs?: Record<string, unknown>
   },
 ) {
   const snapshot = buildSnapshot({ users })
@@ -164,6 +171,11 @@ export function renderRail(
 
   const backing = new Map<string, string>()
   vi.stubGlobal('localStorage', createStorage(backing))
+  // Optional prefs seed: written before render so the rail's
+  // `useState(loadPrefs)` initializer hydrates from it.
+  if (opts?.prefs !== undefined) {
+    backing.set(TOOLBAR_PREFS_KEY, JSON.stringify(opts.prefs))
+  }
   // scopeKey must match the sessionId prop so the persist key is
   // `dsh-milestone.bookmarks.fixture` (the engine reads localStorage at create).
   const store = createBookmarksStore().create('fixture')
