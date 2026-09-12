@@ -42,6 +42,28 @@ export interface BadgeInput {
  * @param input - the mark's snapshot signals.
  * @returns the winning badge kind, or null when no signal applies.
  */
+/**
+ * 0.1.5: durable badge kinds for one projected turn. The fold no longer sees
+ * the chat-layer `turn-error` / `turn-max-tokens` node kinds, but `turn/end`'s
+ * reason carries the same signal, and every `assistant/attempt` settlement
+ * (failed / retried / cancelled / stream error) is a retry.
+ * @param turn - the projection's turn meta (only the two fields are read).
+ * @returns the node-kind vocabulary {@link deriveBadge} consumes; empty when normal.
+ */
+export function kindsForTurn(turn: {
+  readonly endReason?: string
+  readonly attempts?: number
+}): readonly string[] {
+  const kinds: string[] = []
+  if (turn.endReason === 'error' || turn.endReason === 'interrupted') kinds.push('turn-error')
+  if (turn.endReason === 'max-tokens') kinds.push('turn-max-tokens')
+  if ((turn.attempts ?? 0) > 0) kinds.push('model-retry')
+  return kinds.length === 0 ? EMPTY_KINDS : kinds
+}
+
+/** Stable empty result so normal turns never allocate a fresh array. */
+const EMPTY_KINDS: readonly string[] = Object.freeze([])
+
 export function deriveBadge(input: BadgeInput): BadgeKind | null {
   if (input.nodeKinds.includes('turn-error')) return 'error'
   if (input.nodeKinds.includes('turn-max-tokens')) return 'max-tokens'

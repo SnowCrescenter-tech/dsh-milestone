@@ -3,10 +3,31 @@
  * model/purpose/usage tokens for a turn's hover tooltip). No React, no DOM.
  */
 import { describe, it, expect } from 'vitest'
-import { deriveTurnMeta } from './tooltip-logic'
+import { deriveTurnMeta, deriveTurnMetaFromProjection } from './tooltip-logic'
 import type { TurnMeta } from './tooltip-logic'
 
 const emptyMeta = (): TurnMeta => ({ model: null, purpose: null, inputTokens: null, outputTokens: null })
+
+describe('deriveTurnMetaFromProjection (0.1.5 projection → hover meta)', () => {
+  it('restores the model from the projected request/context route', () => {
+    expect(deriveTurnMetaFromProjection({ model: 'deepseek-v4-flash' })).toMatchObject({
+      model: 'deepseek-v4-flash',
+      // 0.1.5 no longer logs a request purpose, so the field stays null.
+      purpose: null,
+    })
+  })
+
+  it('maps the accumulated usage onto the token fields', () => {
+    expect(
+      deriveTurnMetaFromProjection({ model: 'v4', usage: { input: 10, output: 20, total: 30 } }),
+    ).toEqual({ model: 'v4', purpose: null, inputTokens: 10, outputTokens: 20 })
+  })
+
+  it('degrades to all-null for an absent turn or absent usage', () => {
+    expect(deriveTurnMetaFromProjection(undefined)).toEqual(emptyMeta())
+    expect(deriveTurnMetaFromProjection({})).toEqual(emptyMeta())
+  })
+})
 
 /** Minimal structural stubs for the deriveTurnMeta inputs. */
 function nodeStore(entries: ReadonlyArray<readonly [string, { kind: string; data: unknown }]>) {

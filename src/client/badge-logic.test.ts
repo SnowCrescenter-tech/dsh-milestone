@@ -6,10 +6,30 @@
  * No React, no DOM.
  */
 import { describe, it, expect } from 'vitest'
-import { deriveBadge, badgeRingStyle, badgePulseCss, type BadgeKind } from './badge-logic'
+import { deriveBadge, badgeRingStyle, badgePulseCss, kindsForTurn, type BadgeKind } from './badge-logic'
 
 /** Base input with every signal off. */
 const base = { nodeKinds: [], lastMark: false, running: false, awaitingInput: false } as const
+
+describe('kindsForTurn (0.1.5 projection → durable badge kinds)', () => {
+  it('maps the turn/end reason onto the removed node kinds', () => {
+    expect(kindsForTurn({ endReason: 'error' })).toEqual(['turn-error'])
+    expect(kindsForTurn({ endReason: 'interrupted' })).toEqual(['turn-error'])
+    expect(kindsForTurn({ endReason: 'max-tokens' })).toEqual(['turn-max-tokens'])
+  })
+
+  it('treats any assistant/attempt settlement as a retry', () => {
+    expect(kindsForTurn({ attempts: 1 })).toEqual(['model-retry'])
+    expect(kindsForTurn({ endReason: 'error', attempts: 2 })).toEqual(['turn-error', 'model-retry'])
+  })
+
+  it('returns a shared empty array for a normal turn', () => {
+    expect(kindsForTurn({ endReason: 'completed' })).toHaveLength(0)
+    expect(kindsForTurn({})).toHaveLength(0)
+    // Same reference: normal turns never allocate per render.
+    expect(kindsForTurn({})).toBe(kindsForTurn({ endReason: 'completed' }))
+  })
+})
 
 describe('deriveBadge precedence', () => {
   it('error beats everything else', () => {

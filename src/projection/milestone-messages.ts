@@ -17,7 +17,9 @@
  *   - `assistant/message` -> accumulates the turn's token usage and records its
  *     TTFT from the settlement's embedded compact stream
  *   - `assistant/attempt` -> records TTFT for an attempt that settled without a
- *     surface message (failed / retried / cancelled / stream error)
+ *     surface message and counts it (drives the retry ring)
+ *   - `request/context`-> records the provider/model route; carried forward and
+ *     applied to the turn being served, seeds every later turn
  *   - `turn/end`    -> closes turn meta (end time, end reason)
  *
  * 0.1.5 migration: the standalone `assistant/chunk` event no longer exists —
@@ -83,12 +85,28 @@ export interface MilestoneTurnMeta {
    * falls back to `input + output`.
    */
   readonly usage?: { readonly input: number; readonly output: number; readonly total: number }
+  /** Provider route serving the turn (from the latest `request/context`). */
+  readonly provider?: string
+  /** Provider-owned model id serving the turn (from the latest `request/context`). */
+  readonly model?: string
+  /**
+   * Count of `assistant/attempt` settlements on this turn — failed, retried,
+   * cancelled, or stream-error attempts that committed no surface message.
+   * Non-zero drives the "retry" ring and marks the turn abnormal.
+   */
+  readonly attempts?: number
 }
 
 /** Fold state (plain JSON; arrays keep JSON compatibility). */
 export interface MilestoneMessagesState {
   readonly messages: readonly MilestoneMessageEntry[]
   readonly turns: readonly MilestoneTurnMeta[]
+  /**
+   * Latest `request/context` route. `request/context` is logged only when the
+   * route differs, so it is carried forward and seeds every turn opened after
+   * it (and patches the turn that is open when it lands).
+   */
+  readonly route?: { readonly provider: string; readonly model: string }
 }
 
 /** Client-visible projection view. */
@@ -118,6 +136,9 @@ const turnMetaSchema = z.object({
     output: z.number(),
     total: z.number(),
   }).optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  attempts: z.number().int().nonnegative().optional(),
 })
 
 const milestoneMessagesViewSchema = z.object({
@@ -178,7 +199,8 @@ export const milestoneMessagesProjectionDefinition = {
   key: 'milestone.messages',
   // 2: 0.1.5 fold semantics (embedded stream TTFT; TokenUsage field rename).
   // 3: message entries carry the `user/message` id (DOM anchor mapping).
-  stateVersion: 3,
+  // 4: turn meta carries the `request/context` route + `assistant/attempt` count.
+  stateVersion: 4,
   stateSchema: z.custom<MilestoneMessagesState>(),
   init: (_header: SessionHeader, _inheritedEventCount: SessionLogOffset): MilestoneMessagesState => initialState(),
   apply(state: MilestoneMessagesState, event: SessionEvent): MilestoneMessagesState {
@@ -186,9 +208,18 @@ export const milestoneMessagesProjectionDefinition = {
       case 'turn/start': {
         const turn = event.data.turn
         if (state.turns.some((t) => t.turn === turn)) return state
+        const route = state.route
         return {
-          messages: state.messages,
-          turns: [...state.turns, { turn, startSeq: SessionSeq(event.seq), startTime: event.time }],
+          ...state,
+          turns: [
+            ...state.turns,
+            {
+              turn,
+              startSeq: SessionSeq(event.seq),
+              startTime: event.time,
+              ...(route === undefined ? {} : { provider: route.provider, model: route.model }),
+            },
+          ],
         }
       }
       case 'user/message': {
@@ -198,6 +229,7 @@ export const milestoneMessagesProjectionDefinition = {
         const preview = previewText(content, MESSAGE_PREVIEW_LIMIT)
         const openTurn = state.turns[state.turns.length - 1]
         return {
+          ...state,
           messages: [
             ...state.messages,
             {
@@ -209,7 +241,6 @@ export const milestoneMessagesProjectionDefinition = {
               text,
             },
           ],
-          turns: state.turns,
         }
       }
       case 'assistant/message': {
@@ -249,18 +280,26 @@ export const milestoneMessagesProjectionDefinition = {
         if (next === prior) return state
         const turns = state.turns.slice()
         turns[index] = next
-        return { messages: state.messages, turns }
+        return { ...state, turns }
       }
       case 'assistant/attempt': {
         const turn = event.data.turn
         const index = state.turns.findIndex((t) => t.turn === turn)
-        if (index < 0 || state.turns[index].firstChunkTime !== undefined) return state
-        const stream = event.data.stream
-        const firstToken = Array.isArray(stream) ? assistantStreamFirstTokenTime(stream) : undefined
-        if (firstToken === undefined) return state
+        if (index < 0) return state
+        const prior = state.turns[index]
+        // Every attempt settlement is abnormal — failed, retried, cancelled, or
+        // a stream error — and it commits no surface message, so the count is
+        // the only trace and drives the retry ring.
+        let next: MilestoneTurnMeta = { ...prior, attempts: (prior.attempts ?? 0) + 1 }
+        // TTFT keeps the first token ever streamed for this turn.
+        if (prior.firstChunkTime === undefined) {
+          const stream = event.data.stream
+          const firstToken = Array.isArray(stream) ? assistantStreamFirstTokenTime(stream) : undefined
+          if (firstToken !== undefined) next = { ...next, firstChunkTime: firstToken }
+        }
         const turns = state.turns.slice()
-        turns[index] = { ...turns[index], firstChunkTime: firstToken }
-        return { messages: state.messages, turns }
+        turns[index] = next
+        return { ...state, turns }
       }
       case 'turn/end': {
         const turn = event.data.turn
@@ -272,7 +311,27 @@ export const milestoneMessagesProjectionDefinition = {
           endTime: event.time,
           endReason: (event.data as { reason: TurnEndReason }).reason.kind,
         }
-        return { messages: state.messages, turns }
+        return { ...state, turns }
+      }
+      case 'request/context': {
+        // Route metadata is logged only when the provider/model/capacity or
+        // prompt mode differs, so carry the latest route forward and apply it
+        // to the turn currently being served.
+        const provider = typeof event.data.provider === 'string' ? event.data.provider : ''
+        const model = typeof event.data.model === 'string' ? event.data.model : ''
+        if (provider === '' && model === '') return state
+        const index = state.turns.length - 1
+        const open = index >= 0 ? state.turns[index] : undefined
+        // No open turn (or it already ended): just remember the route; the next
+        // `turn/start` seeds itself from it.
+        if (open === undefined || open.endTime !== undefined) {
+          if (state.route?.provider === provider && state.route.model === model) return state
+          return { ...state, route: { provider, model } }
+        }
+        if (open.provider === provider && open.model === model) return state
+        const turns = state.turns.slice()
+        turns[index] = { ...open, provider, model }
+        return { ...state, route: { provider, model }, turns }
       }
       default:
         return state

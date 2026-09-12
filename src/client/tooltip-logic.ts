@@ -122,13 +122,17 @@ export function deriveTurnMeta(
  * @returns the turn's metadata, null where unknown.
  */
 export function deriveTurnMetaFromProjection(
-  turn: { readonly usage?: { readonly input: number; readonly output: number; readonly total: number } } | undefined,
+  turn: {
+    readonly model?: string
+    readonly usage?: { readonly input: number; readonly output: number; readonly total: number }
+  } | undefined,
 ): TurnMeta {
-  if (turn?.usage === undefined) return EMPTY_META
+  if (turn === undefined) return EMPTY_META
   return {
-    model: null,
+    model: turn.model ?? null,
+    // 0.1.5 no longer logs a per-request purpose, so the field stays null.
     purpose: null,
-    inputTokens: turn.usage.input,
-    outputTokens: turn.usage.output,
+    inputTokens: turn.usage?.input ?? null,
+    outputTokens: turn.usage?.output ?? null,
   }
 }

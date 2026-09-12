@@ -43,7 +43,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FocusEvent as ReactFocusEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime, PropsStore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
-import { badgePulseCss, badgeRingStyle, deriveBadge } from './badge-logic'
+import { badgePulseCss, badgeRingStyle, deriveBadge, kindsForTurn } from './badge-logic'
 import type { BadgeKind } from './badge-logic'
 import { BALL_SIZE, clampBallPosition, defaultBallPosition, isDragGesture } from './ball-position'
 import type { BallPosition } from './ball-position'
@@ -600,8 +600,19 @@ export function MilestoneRail({
   // 'model-retry') indexed by the turn their node sits on. A cancelled
   // model-retry is dead (its turn aborted before the retry started) and
   // carries no badge.
-  // 0.1.2: turn-scoped badge kinds are not projected yet; stays empty.
-  const kindsByTurn: ReadonlyMap<number, readonly string[]> = EMPTY_KINDS_BY_TURN
+  // 0.1.5: recovered from the projection fold — `turn/end`'s reason replaces
+  // the removed `turn-error`/`turn-max-tokens` node kinds, and any
+  // `assistant/attempt` settlement counts as a retry.
+  const kindsByTurn = useMemo<ReadonlyMap<number, readonly string[]>>(() => {
+    const turns = projection?.turns
+    if (turns === undefined || turns.length === 0) return EMPTY_KINDS_BY_TURN
+    const map = new Map<number, readonly string[]>()
+    for (const t of turns) {
+      const kinds = kindsForTurn(t)
+      if (kinds.length > 0) map.set(t.turn, kinds)
+    }
+    return map
+  }, [projection])
 
   // F4: transient badges target only the newest mark — the session is
   // producing tokens (running) or waiting on a pending interaction

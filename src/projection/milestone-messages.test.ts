@@ -100,6 +100,37 @@ describe('milestone.messages projection', () => {
     expect(state.turns[0].firstChunkTime).toBe(2100)
   })
 
+  it('records the request/context route on the open turn and carries it forward', () => {
+    const state = fold([
+      event('turn/start', 0, 1000, { turn: 1 }),
+      event('user/message', 1, 1001, { id: 'm-1', content: [{ type: 'text', text: 'q' }] }),
+      // Logged only when the route differs, and it lands while turn 1 is open.
+      event('request/context', 2, 1100, { provider: 'deepseek-official', model: 'deepseek-v4-flash' }),
+      event('turn/end', 3, 2000, { turn: 1, reason: { kind: 'completed' } }),
+      event('turn/start', 4, 3000, { turn: 2 }),
+      event('user/message', 5, 3001, { id: 'm-2', content: [{ type: 'text', text: 'q2' }] }),
+    ])
+    expect(state.turns[0]).toMatchObject({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    // The route is carried forward, so the next turn starts with it.
+    expect(state.turns[1]).toMatchObject({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+  })
+
+  it('counts assistant/attempt settlements per turn for the retry ring', () => {
+    const state = fold([
+      event('turn/start', 0, 1000, { turn: 1 }),
+      event('user/message', 1, 1001, { id: 'm-1', content: [{ type: 'text', text: 'q' }] }),
+      event('assistant/attempt', 2, 1500, { turn: 1, step: 0, stream: [] }),
+      event('assistant/attempt', 3, 1600, { turn: 1, step: 0, stream: [] }),
+      event('assistant/message', 4, 2000, {
+        turn: 1,
+        step: 0,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'a' }] },
+        stream: [],
+      }),
+    ])
+    expect(state.turns[0].attempts).toBe(2)
+  })
+
   it('degrades a pre-0.1.5 settlement without a stream instead of throwing', () => {
     const state = fold([
       event('turn/start', 0, 1000, { turn: 6 }),
