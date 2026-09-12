@@ -140,7 +140,17 @@ shell.overlay (root scope)
 ## 更新日志
 
 <details>
-<summary>v0.7.0 / v0.6.6 / v0.6.5 / v0.6.4（点击展开）</summary>
+<summary>v0.7.1 / v0.7.0 / v0.6.6 / v0.6.5 / v0.6.4（点击展开）</summary>
+
+**v0.7.1** · 升级不再被卡（可选 peer + 兼容边界）· 恢复模型与错误徽标 · 跟随官方 0.1.5-rc.2 · 457 项测试
+
+- **升级不再被 ERESOLVE 卡死**：三个 DSH 客户端包 peer 改为 **optional**——官方换 rc 线时只告警、不再拒绝安装；并新增**渲染期兼容边界**：契约一旦变化，给出明确提示（"与当前 DSH 版本不兼容，请升级插件"），不再静默消失或拖垮宿主 UI。
+- **恢复悬停卡的模型**：改从 0.1.5 的 `request/context` 事件读取 provider / model（此前恒为 `null`）。
+- **恢复错误 / 重试徽标**：由 `turn/end` 的结束原因（error / max-tokens）与 `assistant/attempt` 结算次数重建（此前徽标恒空）。
+- **跟随官方 `0.1.5-rc.2`**（npm `latest` 仍为 rc.1；peer 范围 `>=0.1.5-rc.1 <0.3.0-0` 同时覆盖两者）；上游 `dsh-client-store` 漏声明 `zustand`/`immer` 的兜底扩到整条 0.1.5 线。
+- **CI 新增 `advisory / dsh next`**：持续对官方 `next` 线跑类型检查与测试，提前预警破坏性变更（首跑即发现 rc.2 与上述打包缺陷）。
+
+> [GitHub Release v0.7.1](https://github.com/SnowCrescenter-tech/dsh-milestone/releases/tag/v0.7.1)
 
 **v0.7.0** · 跟随官方 0.1.5（会话投影数据层）· 折叠为可拖动悬浮球（issue #4）· 447 项测试
 
