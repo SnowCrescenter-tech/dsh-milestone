@@ -9,15 +9,16 @@ minimumReleaseAge: 0
 overrides:
   zod: 4.4.3
 
-# Upstream packaging bug in @deepseek-ai/dsh-client-store@0.1.5-rc.1: its
-# lib/index.js imports zustand/vanilla + zustand/middleware + zustand/shallow
-# and immer at runtime, but the manifest declares NEITHER (both sit in
-# devDependencies; 0.1.2-rc.1 correctly declared them as real dependencies).
-# Without this, every consumer of the package fails with
+# Upstream packaging bug in @deepseek-ai/dsh-client-store (still present in
+# 0.1.5-rc.2): its lib/index.js imports zustand/vanilla + zustand/middleware +
+# zustand/shallow and immer at runtime, but the manifest declares NEITHER (both
+# sit in devDependencies; 0.1.2-rc.1 correctly declared them as real
+# dependencies). Without this, every consumer of the package fails with
 # "Cannot find package 'zustand'" the moment the store module is imported.
-# Declaring them here restores resolution for tests, local harness runs and CI.
+# Scoped to the 0.1.5 line so the workaround does not pin a future line that
+# may have fixed its manifest.
 packageExtensions:
-  '@deepseek-ai/dsh-client-store@0.1.5-rc.1':
+  '@deepseek-ai/dsh-client-store@>=0.1.5-rc.1 <0.1.6-0':
     dependencies:
       zustand: ~4.4.7
       immer: ^10.1.1
