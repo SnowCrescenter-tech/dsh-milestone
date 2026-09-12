@@ -153,6 +153,13 @@ export function renderRail(
      * legacy `String(seq)`. Exercises `findRow`'s message-id suffix matching.
      */
     harnessAnchors?: boolean
+    /** Snapshot `hasMore`: whether an older page can still be fetched. */
+    hasMore?: boolean
+    /**
+     * When set, only these message seqs get a DOM anchor row — simulates a rail
+     * whose dots cover the whole log while the DOM holds a loaded window only.
+     */
+    renderedSeqs?: readonly number[]
     /**
      * Toolbar-prefs seed (`dsh-milestone.toolbar`) written to localStorage
      * BEFORE the rail mounts, so its `useState(loadPrefs)` initializer
@@ -161,7 +168,7 @@ export function renderRail(
     prefs?: Record<string, unknown>
   },
 ) {
-  const snapshot = buildSnapshot({ users })
+  const snapshot = buildSnapshot({ users, hasMore: opts?.hasMore })
   const projection = projectionFromSnapshot(snapshot)
   // 0.1.2: useSession exposes lifecycle state; the fixture's legacy `pending`
   // array is mapped onto the new `queue` field the rail reads for awaitingInput.
@@ -209,17 +216,19 @@ export function renderRail(
   const result = render(
     <div data-conversation-scroll>
       <div style={{ height: 400 }}>
-        {users.map((user) => (
-          // 0.1.2: rail marks are keyed by the message's event seq string, so
-          // the anchor rows must carry `data-chat-anchor-key` = seq as well.
-          <div
-            key={user.key}
-            data-chat-anchor-key={opts?.harnessAnchors ? `13:input-messagemsg-${user.seq}` : String(user.seq)}
-            style={{ height: 48 }}
-          >
-            {user.text}
-          </div>
-        ))}
+        {users
+          .filter((user) => opts?.renderedSeqs === undefined || opts.renderedSeqs.includes(user.seq))
+          .map((user) => (
+            // 0.1.2: rail marks are keyed by the message's event seq string, so
+            // the anchor rows must carry `data-chat-anchor-key` = seq as well.
+            <div
+              key={user.key}
+              data-chat-anchor-key={opts?.harnessAnchors ? `13:input-messagemsg-${user.seq}` : String(user.seq)}
+              style={{ height: 48 }}
+            >
+              {user.text}
+            </div>
+          ))}
       </div>
       <MilestoneRail {...props} />
     </div>,

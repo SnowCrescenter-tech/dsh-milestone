@@ -343,6 +343,18 @@ const DEEP_LINK_POLL_DELAY = 150
 const DEEP_LINK_MAX_POLLS = 5
 /** P3: bounded polls after `loadOlder`, then the deep link gives up silently. */
 const DEEP_LINK_MAX_RETRY_POLLS = 5
+/**
+ * Jump paging: the rail's dots cover the WHOLE log while the DOM renders only
+ * the loaded window, so activating an older dot must page history in first.
+ * Bounded so an unreachable target gives up instead of paging forever.
+ */
+const LOCATE_MAX_PAGES = 20
+/** Delay between a page fetch and the DOM-row recheck (lets React commit). */
+const LOCATE_POLL_DELAY = 150
+/** Pulse applied to the dot whose jump is still paging history in. */
+const LOCATING_CSS = `@keyframes ms-locating { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+[data-locating="true"] { animation: ms-locating 800ms ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { [data-locating="true"] { animation: none } }`
 /** B4 update-check: mount-time silent check delay (ms) — give the harness
  * time to settle before hitting the registry. */
 const UPDATE_CHECK_MOUNT_DELAY = 1500
@@ -660,6 +672,14 @@ export function MilestoneRail({
   const currentKey = useCurrentAnchor(marks.map((m) => m.key))
 
   /**
+   * Mark key whose jump is still paging older history in; its dot pulses so a
+   * slow locate never looks like a dead click.
+   */
+  const [locatingKey, setLocatingKey] = useState<string | null>(null)
+  /** Guards against overlapping locate loops (a second activation is ignored). */
+  const locatingRef = useRef(false)
+
+  /**
    * P3: jump to the chat row with the given node key — smooth-scroll it into
    * view and write the position back into the URL hash (`#msg=<key>`) so
    * refresh and share preserve it. `history.replaceState` (not a
@@ -673,6 +693,46 @@ export function MilestoneRail({
     if (row === null) return
     row.scrollIntoView({ behavior: 'smooth', block: 'start' })
     history.replaceState(null, '', buildMessageHash(key))
+  }
+
+  /**
+   * Jump to a mark, paging older history in first when its row is not rendered
+   * yet. The dots cover the whole log but the DOM holds only the loaded window,
+   * so without this an older dot is a silent no-op (the official rail pages
+   * unloaded turns in the same way). Bounded to LOCATE_MAX_PAGES fetches; the
+   * dot pulses meanwhile.
+   * @param key - the mark key (deep-link payload + exact-match anchor).
+   * @param messageId - the user/message id (real-harness anchor suffix).
+   */
+  const locateAndJump = (key: string, messageId: string): void => {
+    if (findRow(key, messageId) !== null) {
+      jump(key, messageId)
+      return
+    }
+    if (!hasMore || locatingRef.current) return
+    locatingRef.current = true
+    setLocatingKey(key)
+    void (async () => {
+      try {
+        for (let page = 0; page < LOCATE_MAX_PAGES; page += 1) {
+          try {
+            await loadOlder()
+          } catch {
+            return
+          }
+          await new Promise((resolve) => {
+            window.setTimeout(resolve, LOCATE_POLL_DELAY)
+          })
+          if (findRow(key, messageId) !== null) {
+            jump(key, messageId)
+            return
+          }
+        }
+      } finally {
+        locatingRef.current = false
+        setLocatingKey(null)
+      }
+    })()
   }
 
   // T10: the visible dot list — the full marks list, or (filter on) the
@@ -1175,7 +1235,7 @@ export function MilestoneRail({
     const next = nextMatchIndex(search.activePos, matches.length, 1)
     setSearch((s) => ({ ...s, activePos: next }))
     const mark = displayMarks[matches[next]]
-    jump(mark.key, mark.messageId)
+    locateAndJump(mark.key, mark.messageId)
   }
 
   const onSearchKeyDown = (e: ReactKeyboardEvent<HTMLInputElement>): void => {
@@ -1843,6 +1903,7 @@ export function MilestoneRail({
       data-inset={String(inset)}
     >
       {pulseCss !== null && <style>{pulseCss}</style>}
+      {locatingKey !== null && <style>{LOCATING_CSS}</style>}
       {focusActive && <style>{buildFocusCss(prefs.focus)}</style>}
       <style>{MODAL_CSS}</style>
       {showLoadOlder && (
@@ -2985,8 +3046,9 @@ export function MilestoneRail({
                   const rect = e.currentTarget.getBoundingClientRect()
                   setHover({ ...buildHover(mark, item.displayIndex), top: rect.top + rect.height / 2 })
                 }}
-                onClick={() => jump(mark.key, mark.messageId)}
+                onClick={() => locateAndJump(mark.key, mark.messageId)}
                 data-rail-dot
+                data-locating={locatingKey === mark.key ? 'true' : undefined}
                 data-turn-gap={showGroupGap ? 'true' : undefined}
                 data-turn={showGroupGap && mark.turn !== undefined ? mark.turn : undefined}
                 data-collapsed-summary={summaryCount !== undefined ? 'true' : undefined}

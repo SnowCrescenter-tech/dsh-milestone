@@ -125,6 +125,41 @@ describe('MilestoneRail deep links (P3)', () => {
     expect(jumped?.dataset.chatAnchorKey).toBe('13:input-messagemsg-2')
   })
 
+  it('pages older history in when the clicked dot is outside the loaded window', async () => {
+    vi.useFakeTimers()
+    // The dots cover the whole log, but only the FIRST message's row is rendered
+    // (the DOM holds the loaded window; older rows page in on demand).
+    const { loadOlder } = renderRail(USERS, { hasMore: true, renderedSeqs: [USERS[0].seq] })
+
+    fireEvent.click(dot(3))
+
+    // The locate loop fetches one older page immediately, then polls the DOM.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(loadOlder).toHaveBeenCalledTimes(1)
+    // The dot pulses while the target is being paged in — never a dead click.
+    expect(document.querySelector('[data-locating="true"]')).not.toBeNull()
+
+    // Bounded: it gives up after the page budget and clears the pulse.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30 * 150 + 500)
+    })
+    expect(loadOlder.mock.calls.length).toBeGreaterThan(1)
+    expect(loadOlder.mock.calls.length).toBeLessThanOrEqual(20)
+    expect(document.querySelector('[data-locating]')).toBeNull()
+  })
+
+  it('does not page when there is no older history to fetch', async () => {
+    const { loadOlder } = renderRail(USERS, { hasMore: false, renderedSeqs: [USERS[0].seq] })
+    fireEvent.click(dot(3))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(loadOlder).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-locating]')).toBeNull()
+  })
+
   it('clicking a rail dot scrolls and writes #msg=<key> via history.replaceState', () => {
     const replaceSpy = vi.spyOn(history, 'replaceState')
     const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
