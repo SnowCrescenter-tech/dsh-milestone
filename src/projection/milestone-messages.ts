@@ -24,10 +24,10 @@
  *
  * 0.1.5 migration: the standalone `assistant/chunk` event no longer exists —
  * streaming timing now travels inside the settlement events as a compact
- * `stream: AssistantStreamRecord[]`, and the vendor reader
- * `assistantStreamFirstTokenTime` answers TTFT from it without expanding the
- * stream. `stateVersion` was bumped so 0.1.2-era persisted checkpoints are
- * discarded instead of forward-applied.
+ * `stream`, and a LOCAL first-token scan answers TTFT from it without expanding
+ * the stream. No model-facing package is involved: this plugin reads the
+ * session log only. `stateVersion` was bumped so 0.1.2-era persisted
+ * checkpoints are discarded instead of forward-applied.
  *
  * State is plain JSON (persisted-cache precondition) and updates are
  * reference-stable: an apply that changes nothing returns the same state.
@@ -40,7 +40,6 @@ import {
   type SessionLogOffset,
   type TurnEndReason,
 } from '@deepseek-ai/dsh-session'
-import { assistantStreamFirstTokenTime } from '@deepseek-ai/dsh-llm'
 import type { ProjectionDefinition } from '@deepseek-ai/dsh-session-projection'
 
 /** Preview budget: one tooltip line (matches the rail's 80-char previews). */
@@ -187,6 +186,68 @@ function finiteOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
+/**
+ * Time (ms) of the first token in one compact assistant stream, read from the
+ * records themselves without expanding them.
+ *
+ * Deliberately LOCAL — the plugin reads the session log and takes no dependency
+ * on any model-facing package. This is the small slice of compact-stream
+ * knowledge TTFT needs: a raw `chunk` counts when it carries a non-empty
+ * text/reasoning fragment (or a Tool-call fragment); a packed delta run counts
+ * at its first member whose fragment is non-empty, with a name-bearing
+ * Tool-call run counting from its first member. Block/usage/finish chunks are
+ * never tokens.
+ * @param stream - compact settlement records (untrusted wire JSON).
+ * @returns the first token's time, or undefined when the stream carries none.
+ */
+function firstTokenTime(stream: readonly unknown[]): number | undefined {
+  for (const entry of stream) {
+    if (entry === null || typeof entry !== 'object') continue
+    const record = entry as {
+      type?: unknown
+      time?: unknown
+      time0?: unknown
+      dt?: unknown
+      texts?: unknown
+      args?: unknown
+      name?: unknown
+      chunk?: unknown
+    }
+    if (record.type === 'chunk') {
+      const chunk = record.chunk as { type?: unknown; text?: unknown } | null | undefined
+      if (chunk === null || chunk === undefined || typeof chunk !== 'object') continue
+      const kind = chunk.type
+      const carriesToken =
+        kind === 'text-delta' || kind === 'reasoning-delta'
+          ? typeof chunk.text === 'string' && chunk.text !== ''
+          : kind === 'tool-call-delta'
+      if (carriesToken && typeof record.time === 'number') return record.time
+      continue
+    }
+    if (
+      record.type !== 'text-chunks' &&
+      record.type !== 'reasoning-chunks' &&
+      record.type !== 'tool-call-chunks'
+    ) {
+      continue
+    }
+    if (typeof record.time0 !== 'number') continue
+    if (record.type === 'tool-call-chunks' && typeof record.name === 'string' && record.name !== '') {
+      return record.time0
+    }
+    const fragments = record.type === 'tool-call-chunks' ? record.args : record.texts
+    if (!Array.isArray(fragments)) continue
+    const gaps = Array.isArray(record.dt) ? record.dt : []
+    let time = record.time0
+    for (let index = 0; index < fragments.length; index += 1) {
+      if (index > 0) time += finiteOrZero(gaps[index - 1])
+      const fragment = fragments[index]
+      if (typeof fragment === 'string' && fragment !== '') return time
+    }
+  }
+  return undefined
+}
+
 /** Immutable fold state helper: open-turn bookkeeping lives in the state array tail. */
 const EMPTY_MESSAGES: readonly MilestoneMessageEntry[] = Object.freeze([])
 const EMPTY_TURNS: readonly MilestoneTurnMeta[] = Object.freeze([])
@@ -252,7 +313,7 @@ export const milestoneMessagesProjectionDefinition = {
         // 0.1.5: streaming timing travels in the settlement's embedded stream.
         // Guarded: a migrated pre-0.1.5 log carries no `stream` field.
         const stream = event.data.stream
-        const firstToken = Array.isArray(stream) ? assistantStreamFirstTokenTime(stream) : undefined
+        const firstToken = Array.isArray(stream) ? firstTokenTime(stream) : undefined
         if (firstToken !== undefined && prior.firstChunkTime === undefined) {
           next = { ...next, firstChunkTime: firstToken }
         }
@@ -294,7 +355,7 @@ export const milestoneMessagesProjectionDefinition = {
         // TTFT keeps the first token ever streamed for this turn.
         if (prior.firstChunkTime === undefined) {
           const stream = event.data.stream
-          const firstToken = Array.isArray(stream) ? assistantStreamFirstTokenTime(stream) : undefined
+          const firstToken = Array.isArray(stream) ? firstTokenTime(stream) : undefined
           if (firstToken !== undefined) next = { ...next, firstChunkTime: firstToken }
         }
         const turns = state.turns.slice()
