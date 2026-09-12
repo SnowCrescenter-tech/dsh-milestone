@@ -24,8 +24,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-slots'
 // (kind: 'list', scope: 'root') into this compilation; without it the key is
 // not a member of SlotMap and register/PropsRuntime reject it.
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
-import { MilestoneOverlay } from './MilestoneOverlay.tsx'
-import { MilestoneRail } from './MilestoneRail.tsx'
+import { GuardedMilestoneOverlay, GuardedMilestoneRail } from './CompatBoundary.tsx'
 import { createBookmarksStore } from './bookmarkStore.ts'
 import { createForkAt, createLoadOlder, createOpenSession, createSessionSearch, type SessionServiceFace } from './railInject.ts'
 import { en, zh, type MilestoneKey } from './locales.ts'
@@ -70,7 +69,7 @@ export function apply(ctx: Context): void {
       order: 100,
       children: { 'milestone.rail': { kind: 'single', scope: 'session' } },
     },
-    MilestoneOverlay,
+    GuardedMilestoneOverlay,
   ))
   ctx.slots.inject('milestone.rail', () => ctx.slots.register(
     // T10: store seat — a store FACTORY (framework instantiates per session
@@ -94,6 +93,6 @@ export function apply(ctx: Context): void {
         openSession: createOpenSession(sessions),
       }),
     },
-    MilestoneRail,
+    GuardedMilestoneRail,
   ))
 }

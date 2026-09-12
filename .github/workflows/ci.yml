@@ -45,3 +45,41 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  # Advisory compatibility probe: does the plugin still typecheck and pass
+  # against whatever the DSH packages currently publish on npm's `next` tag?
+  # DSH ships rc lines frequently and a new line routinely reshapes the client
+  # / session / projection contracts (0.1.2 → 0.1.5 changed the event
+  # vocabulary, renamed TokenUsage, and dropped a zustand declaration), so this
+  # job surfaces breakage on the day the line lands instead of letting users hit
+  # it first. It never blocks a merge (`continue-on-error`); read it as a signal.
+  next-line:
+    name: advisory / dsh next
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Move every DSH package to the published next line
+        run: |
+          pnpm add "@deepseek-ai/dsh-llm@next" "@deepseek-ai/dsh-session@next" "@deepseek-ai/dsh-session-projection@next"
+          pnpm add -D "@deepseek-ai/dsh-api-session-controller@next" "@deepseek-ai/dsh-client-locale@next" "@deepseek-ai/dsh-client-store@next" "@deepseek-ai/dsh-client-ui-layout@next" "@deepseek-ai/dsh-client-ui-renderer@next" "@deepseek-ai/dsh-client-ui-session@next" "@deepseek-ai/dsh-client-ui-slots@next"
+
+      - name: Typecheck (advisory)
+        run: pnpm typecheck
+
+      - name: Test (advisory)
+        run: pnpm test
